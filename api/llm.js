@@ -13,12 +13,13 @@ Book: ${bookMeta.title} by ${bookMeta.author}. Source language: ${bookMeta.sourc
 Terminology (enforce exactly when relevant):
 ${glossary.map(g => `- ${g.term} → ${g.translation}`).join('\n') || '(none)'}
 
-Return STRICT JSON only: {"word": string, "lemma": string, "gloss": string, "note": string}.
+Output MUST be a raw JSON object — no markdown fences, no \`\`\`json, no prose before or after. Start your response with { and end with }.
+
+Required shape: {"word": string, "lemma": string, "gloss": string, "note": string}.
 
 Rules:
 - If displayLang == "es": word is the tapped Spanish word as-is; lemma is dictionary form; gloss is a short translation into English (or Russian if book sourceLang == "ru"); note is a one-sentence usage / grammar tip.
-- If displayLang == "ru" or "en": word is the SPANISH EQUIVALENT of the tapped word in this context (not the tapped word itself); lemma is Spanish dictionary form; gloss is the tapped word repeated as confirmation; note is a one-sentence usage tip on the Spanish equivalent. Vocab always flows toward Spanish.
-- Never explain, never wrap in markdown, never add prose. JSON only.`,
+- If displayLang == "ru" or "en": word is the SPANISH EQUIVALENT of the tapped word in this context (not the tapped word itself); lemma is Spanish dictionary form; gloss is the tapped word repeated as confirmation; note is a one-sentence usage tip on the Spanish equivalent. Vocab always flows toward Spanish.`,
 
   breakdown: (glossary, bookMeta) => `You are a Spanish reading tutor producing an Ilya-Frank-style interleaved breakdown of ONE sentence for a reader at CEFR B1.
 
@@ -27,13 +28,14 @@ Book: ${bookMeta.title} by ${bookMeta.author}. Source language: ${bookMeta.sourc
 Terminology:
 ${glossary.map(g => `- ${g.term} → ${g.translation}`).join('\n') || '(none)'}
 
-Return STRICT JSON only: {"chunks": [{"text": string, "gloss": string}, ...], "clean": string}.
+Output MUST be a raw JSON object — no markdown fences, no \`\`\`json, no prose. Start with { and end with }.
+
+Required shape: {"chunks": [{"text": string, "gloss": string}, ...], "clean": string}.
 
 Rules:
 - Split the sentence into 2-4-word chunks preserving displayed-language word order.
 - Each chunk's gloss is a literal translation into l1 (parenthetical style).
-- "clean" is the full sentence translated fluently into l1 for meaning-check.
-- No explanation, no markdown, JSON only.`,
+- "clean" is the full sentence translated fluently into l1 for meaning-check.`,
 
   translate_chunk: (glossary, bookMeta) => `You are translating a Buddhist text from ${bookMeta.sourceLang} to Spanish at CEFR ${'{{LEVEL}}'} level. Faithful to meaning, natural Spanish, level-appropriate vocabulary.
 
@@ -42,7 +44,9 @@ Book: ${bookMeta.title} by ${bookMeta.author}.
 Terminology (enforce exactly):
 ${glossary.map(g => `- ${g.term} → ${g.translation}`).join('\n') || '(none)'}
 
-Return STRICT JSON only: {"text": string}. No commentary, no markdown fences.`
+Output MUST be a raw JSON object — no markdown fences, no \`\`\`json, no commentary. Start with { and end with }.
+
+Required shape: {"text": string}.`
 };
 
 function pickModel(task) {
@@ -82,8 +86,10 @@ export default async function handler(req, res) {
     });
 
     const raw = resp.content[0]?.text ?? '';
+    // Strip markdown fences if model wrapped response despite instructions
+    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
     let result;
-    try { result = JSON.parse(raw); }
+    try { result = JSON.parse(cleaned); }
     catch { return res.status(502).json({ error: 'model returned non-JSON', raw }); }
 
     res.status(200).json({ result, model, usage: resp.usage });
