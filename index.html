@@ -414,8 +414,163 @@
       el.querySelectorAll('.book-card').forEach(c => c.addEventListener('click', () => nav('book', { id: c.dataset.id })));
     });
 
+    // ============ splitIntoChapters ============
+    function splitIntoChapters(text) {
+      const lines = text.split(/\r?\n/);
+      // Try heuristics in order; first that yields >=2 chapters wins.
+      const heuristics = [
+        { name: 'md-h2', re: /^##\s+(.+)$/ },
+        { name: 'md-h3', re: /^###\s+(.+)$/ },
+        { name: 'chapter-word', re: /^\s*(Глава|ГЛАВА|Часть|ЧАСТЬ|Chapter|CHAPTER|Capítulo|CAPÍTULO)\s+([IVXLCDM\d]+)(?:\s*[.:—-]?\s*(.*))?$/ }
+      ];
+
+      for (const h of heuristics) {
+        const cuts = [];
+        lines.forEach((line, i) => { const m = h.re.exec(line); if (m) cuts.push({ i, title: m[0].replace(/^#+\s*/, '').trim() }); });
+        if (cuts.length >= 2) {
+          const chapters = [];
+          for (let k = 0; k < cuts.length; k++) {
+            const start = cuts[k].i;
+            const end = cuts[k+1] ? cuts[k+1].i : lines.length;
+            const body = lines.slice(start + 1, end).join('\n').trim();
+            chapters.push({ title: cuts[k].title, sourceText: body });
+          }
+          // Prepend front-matter as its own chapter if content exists before first cut
+          const prelude = lines.slice(0, cuts[0].i).join('\n').trim();
+          if (prelude.length > 500) chapters.unshift({ title: '(Front matter)', sourceText: prelude, frontMatter: true });
+          return chapters;
+        }
+      }
+      // Fallback: no chapters detected, whole thing is one chapter
+      return [{ title: 'Chapter 1', sourceText: text.trim() }];
+    }
+    window.splitIntoChapters = splitIntoChapters;
+
+    // ============ Import screen ============
+    route('import', async (el) => {
+      el.innerHTML = `
+        <header class="topbar"><button onclick="nav('library')">← Back</button><h1>Import book</h1></header>
+        <main class="import">
+          <section class="import-source">
+            <h3>Source</h3>
+            <div class="tabs">
+              <button class="tab active" data-tab="paste">Paste text</button>
+              <button class="tab" data-tab="upload">Upload .txt</button>
+              <button class="tab" data-tab="bundled">Bundled</button>
+            </div>
+            <div class="tab-body" data-body="paste"><textarea id="in-paste" rows="10" placeholder="Paste book text..."></textarea></div>
+            <div class="tab-body" data-body="upload" hidden><input type="file" id="in-file" accept=".txt"></div>
+            <div class="tab-body" data-body="bundled" hidden>
+              <select id="in-bundled">
+                <option value="">— pick —</option>
+                <option value="/books/gampopa.txt">Гампопа — Драгоценное украшение освобождения</option>
+                <option value="/books/patrul.txt">Патрул Ринпоче — Слова моего всеблагого учителя</option>
+                <option value="/books/emptiness.txt">Кхенпо Цультрим Гьямцо — Последовательные стадии медитации на пустотность</option>
+              </select>
+            </div>
+          </section>
+          <section class="import-meta">
+            <label>Title <input id="in-title"></label>
+            <label>Author <input id="in-author"></label>
+            <label>Source language
+              <select id="in-lang"><option value="ru">Russian</option><option value="en">English</option><option value="es">Spanish</option></select>
+            </label>
+            <button id="in-detect">Detect chapters →</button>
+          </section>
+          <section id="import-preview" hidden>
+            <h3>Chapters</h3>
+            <ol id="chapter-list"></ol>
+            <button id="in-confirm">Confirm import</button>
+          </section>
+        </main>`;
+
+      // tab switching
+      el.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+        el.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t));
+        el.querySelectorAll('.tab-body').forEach(b => b.hidden = b.dataset.body !== t.dataset.tab);
+      }));
+
+      let detectedChapters = [];
+
+      async function getSourceText() {
+        const active = el.querySelector('.tab.active').dataset.tab;
+        if (active === 'paste') return document.getElementById('in-paste').value;
+        if (active === 'upload') {
+          const f = document.getElementById('in-file').files[0];
+          if (!f) return '';
+          return await f.text();
+        }
+        if (active === 'bundled') {
+          const url = document.getElementById('in-bundled').value;
+          if (!url) return '';
+          const r = await fetch(url);
+          return await r.text();
+        }
+        return '';
+      }
+
+      document.getElementById('in-detect').addEventListener('click', async () => {
+        const text = await getSourceText();
+        if (!text) return alert('No source text');
+        detectedChapters = splitIntoChapters(text);
+        const list = document.getElementById('chapter-list');
+        list.innerHTML = detectedChapters.map((c, i) => `
+          <li data-i="${i}">
+            <input type="checkbox" ${c.frontMatter ? '' : 'checked'} class="ch-include">
+            <input class="ch-title" value="${escapeHtml(c.title || '')}">
+            <span class="ch-size">${c.sourceText.length.toLocaleString()} chars</span>
+            <button class="ch-merge-prev" ${i === 0 ? 'disabled' : ''} title="Merge with previous">⇧ merge</button>
+          </li>`).join('');
+        list.querySelectorAll('.ch-merge-prev').forEach(btn => btn.addEventListener('click', (e) => {
+          const i = parseInt(e.target.closest('li').dataset.i);
+          if (i === 0) return;
+          const prev = detectedChapters[i - 1];
+          prev.sourceText = prev.sourceText + '\n\n' + detectedChapters[i].sourceText;
+          detectedChapters.splice(i, 1);
+          document.getElementById('in-detect').click();
+        }));
+        document.getElementById('import-preview').hidden = false;
+      });
+
+      document.getElementById('in-confirm').addEventListener('click', async () => {
+        const title = document.getElementById('in-title').value.trim();
+        const author = document.getElementById('in-author').value.trim();
+        const sourceLang = document.getElementById('in-lang').value;
+        if (!title || !author) return alert('Title and author required');
+
+        const includes = [...document.querySelectorAll('#chapter-list li')].map(li => ({
+          i: parseInt(li.dataset.i),
+          include: li.querySelector('.ch-include').checked,
+          title: li.querySelector('.ch-title').value.trim()
+        }));
+
+        const kept = includes.filter(x => x.include).map(x => ({ ...detectedChapters[x.i], title: x.title }));
+
+        const book = await Storage.books.put({
+          title, author, sourceLang,
+          createdAt: Date.now(),
+          chapterCount: kept.length,
+          glossary: [],
+          narratorVoice: 'narrator'
+        });
+        for (let i = 0; i < kept.length; i++) {
+          const c = kept[i];
+          await Storage.chapters.put({
+            bookId: book.id,
+            index: i,
+            title: c.title,
+            sourceText: c.sourceText,
+            versions: { [sourceLang]: c.sourceText },
+            positionFraction: 0,
+            playbackResume: null,
+            voiced: {}
+          });
+        }
+        nav('library');
+      });
+    });
+
     // stubs so nav() doesn't throw before those screens exist
-    route('import',   (el) => { el.innerHTML = '<div class="stub"><p>Import (stub — Task 5)</p><button onclick="nav(\'library\')">&#8592; Back</button></div>'; });
     route('book',     (el) => { el.innerHTML = '<div class="stub"><p>Book detail (stub)</p><button onclick="nav(\'library\')">&#8592; Back</button></div>'; });
     route('vocab',    (el) => { el.innerHTML = '<div class="stub"><p>Vocab (stub)</p><button onclick="nav(\'library\')">&#8592; Back</button></div>'; });
     route('settings', (el) => { el.innerHTML = '<div class="stub"><p>Settings (stub)</p><button onclick="nav(\'library\')">&#8592; Back</button></div>'; });
