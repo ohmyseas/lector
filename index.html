@@ -1316,7 +1316,57 @@
         if (v) { await Storage.vocab.delete(v.word, v.bookId); nav('vocab'); }
       }));
     });
-    route('settings', (el) => { el.innerHTML = '<div class="stub"><p>Settings (stub)</p><button onclick="nav(\'library\')">&#8592; Back</button></div>'; });
+    route('settings', async (el) => {
+      const health = await fetch('/api/health').then(r => r.json()).catch(() => ({}));
+      const stats = await Storage.audio.stats();
+      const est = navigator.storage?.estimate ? await navigator.storage.estimate() : null;
+      const books = await Storage.books.list();
+      el.innerHTML = `
+        <header class="topbar"><button onclick="nav('library')">&#8592;</button><h1>Settings</h1></header>
+        <main class="settings">
+          <section>
+            <h3>Backend</h3>
+            <ul>
+              <li>LLM: ${health.llmConfigured ? '&#10003;' : '&#10007;'}</li>
+              <li>TTS: ${health.ttsConfigured ? '&#10003;' : '&#10007;'}</li>
+              <li>Narrator voice: ${health.voices?.narrator ? '&#10003;' : '&#10007; not set'}</li>
+              <li>Kravtsov voice: ${health.voices?.kravtsov ? '&#10003;' : '&#10007; not set'}</li>
+            </ul>
+          </section>
+          <section>
+            <h3>Cache</h3>
+            <p>Audio: ${stats.count} clips, ${(stats.bytes/1024/1024).toFixed(1)} MB</p>
+            ${est ? `<p>Browser storage: ${(est.usage/1024/1024).toFixed(0)} / ${(est.quota/1024/1024).toFixed(0)} MB</p>` : ''}
+            <button id="btn-evict">Evict half the cache</button>
+            <button id="btn-wipe" class="danger">Wipe everything</button>
+          </section>
+          <section>
+            <h3>Per-book narrator voice</h3>
+            <ul>
+              ${books.map(b => `<li>${escapeHtml(b.title)}
+                <select data-book="${escapeHtml(b.id)}" class="voice-sel">
+                  <option value="narrator" ${b.narratorVoice==='narrator'?'selected':''}>Narrator (Spanish)</option>
+                  <option value="kravtsov" ${b.narratorVoice==='kravtsov'?'selected':''}>Kravtsov (cloned)</option>
+                </select></li>`).join('')}
+            </ul>
+          </section>
+        </main>`;
+      document.getElementById('btn-evict').addEventListener('click', async () => {
+        const freed = await Storage.audio.evictOldest(stats.bytes / 2);
+        alert('Freed ' + (freed/1024/1024).toFixed(1) + ' MB');
+        nav('settings');
+      });
+      document.getElementById('btn-wipe').addEventListener('click', async () => {
+        if (!confirm('Wipe ALL books, chapters, vocab, and audio? This cannot be undone.')) return;
+        await Promise.all([LF_META.clear(), LF_TEXT.clear(), LF_AUDIO.clear()]);
+        nav('library');
+      });
+      el.querySelectorAll('.voice-sel').forEach(sel => sel.addEventListener('change', async (e) => {
+        const b = await Storage.books.get(e.target.dataset.book);
+        b.narratorVoice = e.target.value;
+        await Storage.books.put(b);
+      }));
+    });
 
     window.Storage = Storage;
     window.nav = nav;
