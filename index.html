@@ -348,6 +348,12 @@
     .play-btn[disabled] { opacity: 0.4; cursor: not-allowed; }
     .speed { font-family: var(--sans); font-size: 0.8rem; padding: 3px 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--fg); cursor: pointer; }
 
+    /* ===== Recite mode ===== */
+    .sent.reciting { outline: 2px dashed #b89b62; }
+    .r-hit { color: #2c7a2c; }
+    .r-miss { color: #c44; }
+    .r-score { font-family: var(--sans); font-size: 12px; color: #888; }
+
     /* ===== Responsive ===== */
     @media (max-width: 480px) {
       .topbar { padding: var(--sp-3) var(--sp-4); }
@@ -674,6 +680,49 @@
       const updated = await Storage.chapters.get(chapter.id);
       updated.voiced = { ...(updated.voiced || {}), [voiceId]: true };
       await Storage.chapters.put(updated);
+    }
+
+    // ============ Recognition helpers ============
+    function normalizeWords(s) {
+      return s.toLowerCase().replace(/[.,;:!?¡¿"'()\[\]«»—–…]/g, '').split(/\s+/).filter(Boolean);
+    }
+
+    async function reciteSentence(sentEl, expected, lang) {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { alert('SpeechRecognition not supported in this browser'); return; }
+      const rec = new SR();
+      rec.lang = lang === 'es' ? 'es-ES' : lang === 'ru' ? 'ru-RU' : 'en-GB';
+      rec.interimResults = false;
+      rec.maxAlternatives = 1;
+      sentEl.classList.add('reciting');
+      rec.start();
+      rec.onresult = (ev) => {
+        const heard = ev.results[0][0].transcript;
+        const want = normalizeWords(expected);
+        const got = normalizeWords(heard);
+        const matched = new Set();
+        got.forEach(g => { const i = want.indexOf(g); if (i >= 0 && !matched.has(i)) matched.add(i); });
+        const score = Math.round(100 * matched.size / want.length);
+        // annotate sentence: rebuild spans with color classes
+        const spans = [...sentEl.querySelectorAll('.w')];
+        let wi = 0;
+        spans.forEach(sp => {
+          const w = sp.textContent.replace(/[.,;:!?¡¿"'()\[\]«»—–…]/g,'').toLowerCase().trim();
+          if (!w) return;
+          sp.classList.remove('r-hit','r-miss');
+          sp.classList.add(matched.has(wi) ? 'r-hit' : 'r-miss');
+          wi++;
+        });
+        sentEl.classList.remove('reciting');
+        const badge = document.createElement('span'); badge.className = 'r-score'; badge.textContent = ' ' + score + '%';
+        sentEl.appendChild(badge);
+        setTimeout(() => {
+          spans.forEach(sp => sp.classList.remove('r-hit','r-miss'));
+          badge.remove();
+        }, 5000);
+      };
+      rec.onerror = () => sentEl.classList.remove('reciting');
+      rec.onend = () => sentEl.classList.remove('reciting');
     }
 
     // ============ RWL Playback Engine ============
@@ -1086,6 +1135,14 @@
         new Audio(URL.createObjectURL(blob)).play();
       });
 
+      // ---- Ctrl+click recites sentence with recognition ----
+      el.querySelector('main.reader').addEventListener('click', (e) => {
+        if (!e.ctrlKey) return;
+        const sent = e.target.closest('.sent');
+        if (!sent) return;
+        reciteSentence(sent, sent.textContent.trim(), displayLang);
+      });
+
       // ---- Route teardown: stop player when navigating away ----
       readerAbort.signal.addEventListener('abort', () => Player.stop());
 
@@ -1095,6 +1152,7 @@
         el.querySelector('main.reader').addEventListener('click', async (e) => {
           if (e.altKey) return;
           if (e.shiftKey) return;
+          if (e.ctrlKey) return;
           const w = e.target.closest('.w');
           if (!w) { pop.hidden = true; return; }
           const sent = w.closest('.sent');
