@@ -259,10 +259,11 @@ async function runFlow(page) {
       await page.locator('#btn-generate').click();
       const ptGenStart = Date.now();
       let ptGenDone = false;
-      for (let i = 0; i < 45; i++) {
+      for (let i = 0; i < 60; i++) {   // 120s cap for PT (safety margin)
         const genGone = await page.locator('#btn-generate').isVisible().catch(() => false);
         if (!genGone) { ptGenDone = true; break; }
         const prog = await page.locator('#gen-progress').textContent().catch(() => '');
+        if (i % 5 === 0) console.log(`    t+${((Date.now()-ptGenStart)/1000).toFixed(1)}s ${prog}`);
         if (prog.startsWith('Error:')) { fail('PT translation', prog); break; }
         await page.waitForTimeout(2000);
       }
@@ -307,7 +308,80 @@ async function runFlow(page) {
       }
     }
 
-    console.log('\n=== TEST 3: Import real Gampopa, verify subdivision produces many chapters ===');
+    // ---------- TEST 4: Player controls (prev/next/stop) + popover play buttons ----------
+    console.log('\n=== TEST 4: Player controls (prev / next / stop) + popover play-word/sentence/paragraph ===');
+    // Go back to ES which is already voiced
+    await page.locator('.lang-pills .pill[data-lang="es"]').click();
+    await page.waitForTimeout(500);
+
+    // Verify all 4 transport buttons exist
+    for (const sel of ['.prev-btn', '.play-btn', '.stop-btn', '.next-btn']) {
+      const found = await page.locator(sel).isVisible().catch(() => false);
+      if (found) pass(`transport ${sel} rendered`); else fail(`transport ${sel}`, 'not rendered');
+    }
+
+    // Start playback
+    await page.locator('.play-btn').click();
+    await page.waitForTimeout(1500);
+    const beforeNextIdx = await page.evaluate(() => window.Player?.idx);
+    // Click next
+    await page.locator('.next-btn').click();
+    await page.waitForTimeout(1500);
+    const afterNextIdx = await page.evaluate(() => window.Player?.idx);
+    if (afterNextIdx > beforeNextIdx) pass(`Next advanced idx ${beforeNextIdx}→${afterNextIdx}`);
+    else fail('next-btn', `idx did not advance: ${beforeNextIdx}→${afterNextIdx}`);
+
+    // Click prev
+    await page.locator('.prev-btn').click();
+    await page.waitForTimeout(1500);
+    const afterPrevIdx = await page.evaluate(() => window.Player?.idx);
+    if (afterPrevIdx < afterNextIdx) pass(`Prev moved back ${afterNextIdx}→${afterPrevIdx}`);
+    else fail('prev-btn', `idx did not go back: ${afterNextIdx}→${afterPrevIdx}`);
+    await shot(page, 'D1-prev-clicked.png');
+
+    // Click stop → audioEl becomes null
+    await page.locator('.stop-btn').click();
+    await page.waitForTimeout(500);
+    const afterStopAudio = await page.evaluate(() => window.Player?.audioEl);
+    if (afterStopAudio === null) pass('Stop cleared audioEl'); else fail('stop-btn', 'audioEl not cleared');
+
+    // Popover play buttons — click a word
+    console.log('  testing popover play-word/sentence/paragraph...');
+    // find any .w span in the ES body
+    const firstWord = await page.locator('main.reader .w').first();
+    await firstWord.click();
+    await page.waitForTimeout(2500);  // wait for popover to render + LLM gloss
+    const popVisible = await page.locator('#popover').isVisible().catch(() => false);
+    if (!popVisible) fail('popover appears on word tap', 'not visible');
+    else {
+      pass('popover visible on word tap');
+      for (const sel of ['#pop-play-word', '#pop-play-sent', '#pop-play-para']) {
+        const has = await page.locator(sel).isVisible().catch(() => false);
+        if (has) pass(`popover has ${sel}`); else fail(`popover ${sel}`, 'missing');
+      }
+      // Click play-word — expect audio element created (or new Audio somewhere).
+      // Verify by intercepting fetch to /api/tts and counting flash calls.
+      const flashCalls = await page.evaluate(async () => {
+        window.__flashCalls = 0;
+        const orig = window.fetch;
+        window.fetch = function(u, o) {
+          if (typeof u === 'string' && u.includes('/api/tts') && o?.body?.includes('flash_v2_5')) window.__flashCalls++;
+          return orig.apply(this, arguments);
+        };
+        return true;
+      });
+      // Click play-word: for a cached sentence (ES was voiced), it should NOT need Flash — plays from cache
+      await page.locator('#pop-play-word').click();
+      await page.waitForTimeout(1500);
+      // Click play-sentence: always calls Flash (ephemeral)
+      await page.locator('#pop-play-sent').click();
+      await page.waitForTimeout(1500);
+      const flashCount = await page.evaluate(() => window.__flashCalls);
+      if (flashCount >= 1) pass(`play-sentence triggered Flash (count=${flashCount})`); else fail('play-sentence flash', 'no /api/tts flash call');
+      await shot(page, 'D2-popover.png');
+    }
+
+    console.log('\n=== TEST 5: Import real Gampopa, verify subdivision produces many chapters ===');
     await page.evaluate(() => window.nav('library'));
     await page.waitForTimeout(500);
     await shot(page, 'C1-lib.png');

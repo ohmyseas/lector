@@ -892,6 +892,7 @@
       },
       isPlaying() { return !!(this.audioEl && !this.audioEl.paused); }
     };
+    window.Player = Player;   // expose for E2E + debugging
 
     // Play just ONE word — prefers cached sentence audio (seek+stop between timings), falls back to Flash TTS.
     async function playWord(chapterId, sentence, wordText, voiceKeyStr, lang) {
