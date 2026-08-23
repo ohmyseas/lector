@@ -509,10 +509,7 @@
         return '';
       }
 
-      document.getElementById('in-detect').addEventListener('click', async () => {
-        const text = await getSourceText();
-        if (!text) return alert('No source text');
-        detectedChapters = splitIntoChapters(text);
+      function renderChapterList() {
         const list = document.getElementById('chapter-list');
         list.innerHTML = detectedChapters.map((c, i) => `
           <li data-i="${i}">
@@ -527,9 +524,16 @@
           const prev = detectedChapters[i - 1];
           prev.sourceText = prev.sourceText + '\n\n' + detectedChapters[i].sourceText;
           detectedChapters.splice(i, 1);
-          document.getElementById('in-detect').click();
+          renderChapterList();
         }));
         document.getElementById('import-preview').hidden = false;
+      }
+
+      document.getElementById('in-detect').addEventListener('click', async () => {
+        const text = await getSourceText();
+        if (!text) return alert('No source text');
+        detectedChapters = splitIntoChapters(text);
+        renderChapterList();
       });
 
       document.getElementById('in-confirm').addEventListener('click', async () => {
