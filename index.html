@@ -464,12 +464,16 @@
           if (!meta) return null;
           const sourceText = await LF_TEXT.getItem(`chapter:${id}:source`);
           const versions = {};
-          for (const lang of ['ru','en']) {
+          // Read the language-key manifest stored on meta (kept in sync by put).
+          // If missing (legacy chapters), fall back to probing known keys.
+          const langsIndex = meta._langs || ['ru', 'en', 'pt'];
+          for (const lang of langsIndex) {
             const t = await LF_TEXT.getItem(`chapter:${id}:${lang}`);
             if (t) versions[lang] = t;
           }
+          const esLevels = meta._esLevels || ['A2','B1','B2','C1'];
           const esByLevel = {};
-          for (const lvl of ['A2','B1','B2','C1']) {
+          for (const lvl of esLevels) {
             const t = await LF_TEXT.getItem(`chapter:${id}:es:${lvl}`);
             if (t) esByLevel[lvl] = t;
           }
@@ -478,21 +482,40 @@
         },
         async put(chapter) {
           if (!chapter.id) chapter.id = uid();
-          // split text bodies out of meta
+          // split text bodies out of meta; also record which langs/levels exist so get() can find them
           const { sourceText, versions, ...meta } = chapter;
           const idx = (await LF_META.getItem(`chapters:${chapter.bookId}`)) || [];
           if (!idx.includes(chapter.id)) { idx.push(chapter.id); await LF_META.setItem(`chapters:${chapter.bookId}`, idx); }
-          await LF_META.setItem(`chapter:${chapter.id}`, meta);
+
           if (sourceText != null) await LF_TEXT.setItem(`chapter:${chapter.id}:source`, sourceText);
+          // Persist any language key in versions (except es which is level-keyed).
+          const langsWritten = [];
+          const esLevelsWritten = [];
           if (versions) {
-            if (versions.ru) await LF_TEXT.setItem(`chapter:${chapter.id}:ru`, versions.ru);
-            if (versions.en) await LF_TEXT.setItem(`chapter:${chapter.id}:en`, versions.en);
-            if (versions.es) {
-              for (const [lvl, txt] of Object.entries(versions.es)) {
-                await LF_TEXT.setItem(`chapter:${chapter.id}:es:${lvl}`, txt);
+            for (const [lang, val] of Object.entries(versions)) {
+              if (lang === 'es') {
+                if (val && typeof val === 'object') {
+                  for (const [lvl, txt] of Object.entries(val)) {
+                    if (typeof txt === 'string' && txt.length) {
+                      await LF_TEXT.setItem(`chapter:${chapter.id}:es:${lvl}`, txt);
+                      esLevelsWritten.push(lvl);
+                    }
+                  }
+                }
+              } else if (typeof val === 'string' && val.length) {
+                await LF_TEXT.setItem(`chapter:${chapter.id}:${lang}`, val);
+                langsWritten.push(lang);
               }
             }
           }
+          // Store the language manifest on meta so get() knows which keys to look up.
+          // Merge with any prior manifest (don't lose langs from earlier writes).
+          const priorMeta = await LF_META.getItem(`chapter:${chapter.id}`);
+          const priorLangs = priorMeta?._langs || [];
+          const priorEs = priorMeta?._esLevels || [];
+          meta._langs = Array.from(new Set([...priorLangs, ...langsWritten]));
+          meta._esLevels = Array.from(new Set([...priorEs, ...esLevelsWritten]));
+          await LF_META.setItem(`chapter:${chapter.id}`, meta);
           return chapter;
         },
         async delete(id) {
@@ -501,9 +524,11 @@
           const idx = ((await LF_META.getItem(`chapters:${c.bookId}`)) || []).filter(x => x !== id);
           await LF_META.setItem(`chapters:${c.bookId}`, idx);
           await LF_META.removeItem(`chapter:${id}`);
-          for (const suffix of ['source','ru','en','es:A2','es:B1','es:B2','es:C1']) {
-            await LF_TEXT.removeItem(`chapter:${id}:${suffix}`);
-          }
+          await LF_TEXT.removeItem(`chapter:${id}:source`);
+          // Remove any known langs + all ES levels
+          const knownLangs = c._langs || ['ru','en','pt'];
+          for (const lang of knownLangs) await LF_TEXT.removeItem(`chapter:${id}:${lang}`);
+          for (const lvl of (c._esLevels || ['A2','B1','B2','C1'])) await LF_TEXT.removeItem(`chapter:${id}:es:${lvl}`);
           // audio blobs cleaned lazily
         }
       },
