@@ -329,6 +329,13 @@
     .w { cursor: pointer; }
     .w:hover { background: #fffbe0; }
 
+    /* ===== Breakdown (Frank-style) ===== */
+    .breakdown { background: #f7f4ee; border-left: 3px solid #b89b62; padding: 10px 14px; margin: 6px 0 12px; font-family: var(--sans); font-size: 14px; position: relative; }
+    .bd-ch { display: inline-block; margin-right: 6px; }
+    .bd-g { color: #7a6b48; font-style: italic; font-size: 12px; }
+    .bd-clean { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d7c99a; }
+    .bd-close { position: absolute; top: 6px; right: 8px; background: transparent; border: 0; cursor: pointer; font-size: 14px; }
+
     /* ===== Responsive ===== */
     @media (max-width: 480px) {
       .topbar { padding: var(--sp-3) var(--sp-4); }
@@ -942,6 +949,42 @@
           if (!pop.contains(e.target) && !e.target.closest('.w')) pop.hidden = true;
         }, { signal: readerAbort.signal });
       }
+
+      // ---- Frank-style sentence breakdown on double-click ----
+      el.querySelector('main.reader').addEventListener('dblclick', async (e) => {
+        const sent = e.target.closest('.sent');
+        if (!sent || sent.dataset.hasBreakdown) return;
+        const sentence = sent.textContent.trim();
+        const l1 = displayLang === 'es' ? (book.sourceLang === 'ru' ? 'ru' : 'en') : displayLang;
+        const holder = document.createElement('div');
+        holder.className = 'breakdown';
+        holder.textContent = 'Loading breakdown...';
+        sent.after(holder);
+        sent.dataset.hasBreakdown = '1';
+
+        try {
+          const r = await fetch('/api/llm', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              task: 'breakdown',
+              input: { sentence, displayLang, l1 },
+              glossary: book.glossary || [],
+              bookMeta: { title: book.title, author: book.author, sourceLang: book.sourceLang }
+            })
+          });
+          const j = await r.json();
+          if (!r.ok) throw new Error(j.error);
+          const b = j.result;
+          holder.innerHTML = `
+            <div class="bd-chunks">${b.chunks.map(c => `<span class="bd-ch"><span class="bd-t">${escapeHtml(c.text)}</span> <span class="bd-g">(${escapeHtml(c.gloss)})</span></span>`).join(' ')}</div>
+            <div class="bd-clean">${escapeHtml(b.clean)}</div>
+            <button class="bd-close">&#10005;</button>`;
+          holder.querySelector('.bd-close').addEventListener('click', () => { holder.remove(); delete sent.dataset.hasBreakdown; });
+        } catch (err) {
+          holder.textContent = 'Error: ' + err.message;
+        }
+      });
     });
 
     // stubs so nav() doesn't throw before those screens exist
