@@ -349,9 +349,18 @@
     .pc-btn[disabled] { opacity: 0.35; cursor: not-allowed; }
     .play-btn { font-size: 16px; padding: 4px 12px; }
     .speed { font-family: var(--sans); font-size: 0.8rem; padding: 3px 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--fg); cursor: pointer; margin-left: 4px; }
-    .pop-play-row { display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+    .pop-play-row { display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); flex-wrap: wrap; }
     .pop-play-row button { font-size: 12px; padding: 4px 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
-    .pop-play-row button:hover { background: var(--border); }
+    .pop-play-row button:hover:not(:disabled) { background: var(--border); }
+    .pop-play-row button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .pop-play-row #pop-jump-sent, .pop-play-row #pop-jump-para { background: var(--accent); color: white; border-color: var(--accent); }
+    .pop-play-row #pop-jump-sent:hover:not(:disabled), .pop-play-row #pop-jump-para:hover:not(:disabled) { filter: brightness(1.05); background: var(--accent); }
+    .pop-hint { margin: 6px 0 0; color: var(--fg-muted); }
+    .book-card { position: relative; }
+    .book-delete { position: absolute; top: 8px; right: 8px; background: transparent; border: 1px solid transparent; color: var(--fg-muted); font-size: 16px; padding: 4px 8px; border-radius: 4px; cursor: pointer; opacity: 0.4; transition: opacity 0.15s, background 0.15s; }
+    .book-card:hover .book-delete { opacity: 1; }
+    .book-delete:hover { background: #fdd; color: #c33; border-color: #f88; }
+    .book-delete:disabled { cursor: wait; }
     .pill.has-content { border-color: var(--accent); color: var(--fg); }
     .pill .pill-dot { color: var(--accent); font-size: 14px; line-height: 1; margin-left: 2px; vertical-align: 0; }
     .lang-availability { font-family: var(--sans); font-size: 13px; color: var(--fg-muted); margin: 8px 0 16px; }
@@ -448,11 +457,26 @@
           return book;
         },
         async delete(id) {
+          // Capture chapter IDs BEFORE removing so we can purge audio blobs
+          const chIdx = (await LF_META.getItem(`chapters:${id}`)) || [];
           const ids = ((await LF_META.getItem('books:index')) || []).filter(x => x !== id);
           await LF_META.setItem('books:index', ids);
           await LF_META.removeItem(`book:${id}`);
-          // cascade chapters
-          const chIdx = (await LF_META.getItem(`chapters:${id}`)) || [];
+          // Purge audio blobs owned by these chapters (audio store keys are `chapterId:hash:voiceKey`)
+          try {
+            const lru = (await LF_AUDIO.getItem('__lru__')) || [];
+            const keep = [];
+            for (const entry of lru) {
+              const chId = entry.key.split(':')[0];
+              if (chIdx.includes(chId)) {
+                await LF_AUDIO.removeItem(entry.key);
+              } else {
+                keep.push(entry);
+              }
+            }
+            await LF_AUDIO.setItem('__lru__', keep);
+          } catch (err) { console.warn('[books.delete] audio purge partial:', err); }
+          // cascade chapter meta + text
           for (const cid of chIdx) await Storage.chapters.delete(cid);
           await LF_META.removeItem(`chapters:${id}`);
         }
@@ -644,18 +668,41 @@
           ${books.length === 0
             ? `<div class="empty"><p>No books yet.</p><button id="btn-import-2">Import your first book</button></div>`
             : books.map(b => `
-              <article class="book-card" data-id="${b.id}">
+              <article class="book-card" data-id="${escapeHtml(b.id)}">
+                <button class="book-delete" data-id="${escapeHtml(b.id)}" title="Delete this book (irreversible)">&#128465;</button>
                 <h2>${escapeHtml(b.title)}</h2>
                 <p class="author">${escapeHtml(b.author || '')}</p>
                 <p class="meta">${escapeHtml(b.chapterCount ?? 0)} chapters</p>
-                <button class="continue" data-id="${b.id}">&#9654; Continue</button>
+                <button class="continue" data-id="${escapeHtml(b.id)}">&#9654; Continue</button>
               </article>`).join('')}
         </main>`;
       document.getElementById('btn-import')?.addEventListener('click', () => nav('import'));
       document.getElementById('btn-import-2')?.addEventListener('click', () => nav('import'));
       document.getElementById('btn-vocab')?.addEventListener('click', () => nav('vocab'));
       document.getElementById('btn-settings')?.addEventListener('click', () => nav('settings'));
-      el.querySelectorAll('.book-card').forEach(c => c.addEventListener('click', () => nav('book', { id: c.dataset.id })));
+      // Card click opens book; but IGNORE clicks that came from the delete button
+      el.querySelectorAll('.book-card').forEach(c => c.addEventListener('click', (ev) => {
+        if (ev.target.closest('.book-delete')) return;
+        nav('book', { id: c.dataset.id });
+      }));
+      // Delete button on each card: confirm → cascade delete (chapters + text + audio)
+      el.querySelectorAll('.book-delete').forEach(btn => btn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const id = btn.dataset.id;
+        const b = books.find(x => x.id === id);
+        const bookLabel = b ? `${b.title}` : 'this book';
+        if (!confirm(`Delete "${bookLabel}"? This removes all chapters, translations, cached audio, and reading positions for this book. Vocabulary saved from it stays. This cannot be undone.`)) return;
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+          await Storage.books.delete(id);
+          nav('library');
+        } catch (err) {
+          alert('Delete failed: ' + err.message);
+          btn.disabled = false;
+          btn.textContent = '\u{1F5D1}';
+        }
+      }));
     });
 
     // ============ splitIntoChapters ============
@@ -1523,18 +1570,22 @@
             const j = await r.json();
             if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
             const g = j.result;
-            // Find the paragraph text so the paragraph-play button knows what to speak.
+            // Compute jump indices for RWL play-from-here
+            const sentIdx = parseInt(sent.dataset.sent, 10);
             const paraEl = w.closest('main.reader p');
-            const paragraphText = paraEl ? paraEl.textContent.trim() : sentence;
+            const firstSentInPara = paraEl?.querySelector('.sent');
+            const paraFirstIdx = firstSentInPara ? parseInt(firstSentInPara.dataset.sent, 10) : sentIdx;
+            const isVoiced = !!ch.voiced?.[currentKey];
             pop.innerHTML = `
               <div class="pop-word"><b>${escapeHtml(g.word)}</b> <span class="pop-lemma">(${escapeHtml(g.lemma)})</span></div>
               <div class="pop-gloss">${escapeHtml(g.gloss)}</div>
               <div class="pop-note">${escapeHtml(g.note || '')}</div>
               <div class="pop-play-row">
-                <button id="pop-play-word" title="Play just this word">&#128266; word</button>
-                <button id="pop-play-sent" title="Play sentence">&#128266; sentence</button>
-                <button id="pop-play-para" title="Play paragraph">&#128266; paragraph</button>
+                <button id="pop-play-word" title="Preview just this word (one-shot)">&#128266; word</button>
+                <button id="pop-jump-sent" title="Play from this sentence with highlights (RWL)"${isVoiced ? '' : ' disabled'}>&#9654; from here</button>
+                <button id="pop-jump-para" title="Play from this paragraph with highlights (RWL)"${isVoiced ? '' : ' disabled'}>&#9654; paragraph</button>
               </div>
+              ${isVoiced ? '' : '<p class="pop-hint"><small>Voice this chapter to enable ▶ from-here jumps.</small></p>'}
               <div class="pop-actions">
                 <button id="pop-save">+ save</button>
                 <button id="pop-close">✕</button>
@@ -1550,13 +1601,25 @@
               }
             });
             document.getElementById('pop-play-word').addEventListener('click', () => {
+              // Ephemeral single-word preview; kills anything else playing first
               playWord(ch.id, sentence, word, currentKey, displayLang);
             });
-            document.getElementById('pop-play-sent').addEventListener('click', () => {
-              playSentence(sentence, displayLang);
+            // "▶ from here (sentence)" — jumps RWL Player to this sentence's global index and continues.
+            // Highlights follow, prev/next/stop work, no parallel audio (Player.start calls stopAllPlayback).
+            document.getElementById('pop-jump-sent').addEventListener('click', () => {
+              if (!isVoiced) return;
+              pop.hidden = true;
+              Player.start(ch, book, displayLang, level, sentIdx);
+              const btn = el.querySelector('.play-btn');
+              if (btn) setTimeout(() => { btn.innerHTML = Player.isPlaying() ? '&#10074;&#10074;' : '&#9654;'; }, 100);
             });
-            document.getElementById('pop-play-para').addEventListener('click', () => {
-              playSentence(paragraphText, displayLang);
+            // "▶ paragraph" — jumps RWL Player to this paragraph's FIRST sentence and continues onwards.
+            document.getElementById('pop-jump-para').addEventListener('click', () => {
+              if (!isVoiced) return;
+              pop.hidden = true;
+              Player.start(ch, book, displayLang, level, paraFirstIdx);
+              const btn = el.querySelector('.play-btn');
+              if (btn) setTimeout(() => { btn.innerHTML = Player.isPlaying() ? '&#10074;&#10074;' : '&#9654;'; }, 100);
             });
             document.getElementById('pop-close').addEventListener('click', () => { pop.hidden = true; });
           } catch (err) {
