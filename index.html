@@ -357,10 +357,21 @@
     .pop-play-row #pop-jump-sent:hover:not(:disabled), .pop-play-row #pop-jump-para:hover:not(:disabled) { filter: brightness(1.05); background: var(--accent); }
     .pop-hint { margin: 6px 0 0; color: var(--fg-muted); }
     .book-card { position: relative; }
-    .book-delete { position: absolute; top: 8px; right: 8px; background: transparent; border: 1px solid transparent; color: var(--fg-muted); font-size: 16px; padding: 4px 8px; border-radius: 4px; cursor: pointer; opacity: 0.4; transition: opacity 0.15s, background 0.15s; }
-    .book-card:hover .book-delete { opacity: 1; }
+    .book-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 4px; opacity: 0.4; transition: opacity 0.15s; }
+    .book-card:hover .book-actions { opacity: 1; }
+    .book-edit, .book-delete { background: transparent; border: 1px solid transparent; color: var(--fg-muted); font-size: 15px; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+    .book-edit:hover { background: var(--border); color: var(--fg); border-color: var(--border); }
     .book-delete:hover { background: #fdd; color: #c33; border-color: #f88; }
-    .book-delete:disabled { cursor: wait; }
+    .book-delete:disabled, .book-edit:disabled { cursor: wait; }
+    .icon-btn { background: transparent; border: 1px solid transparent; color: var(--fg-muted); font-size: 18px; padding: 4px 10px; border-radius: 4px; cursor: pointer; margin-left: auto; }
+    .icon-btn:hover { background: var(--border); color: var(--fg); }
+    .book-heading { display: flex; flex-direction: column; }
+    .book-heading.edit-mode { gap: 8px; width: 100%; }
+    .edit-field { display: flex; flex-direction: column; font-family: var(--sans); font-size: 12px; color: var(--fg-muted); gap: 3px; }
+    .edit-field input, .edit-field textarea { font-family: var(--serif); font-size: 15px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--fg); resize: vertical; }
+    .edit-actions { display: flex; gap: 6px; }
+    button.secondary { font-size: 14px; padding: 6px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-family: var(--sans); color: var(--fg); }
+    button.secondary:hover { background: var(--border); }
     .pill.has-content { border-color: var(--accent); color: var(--fg); }
     .pill .pill-dot { color: var(--accent); font-size: 14px; line-height: 1; margin-left: 2px; vertical-align: 0; }
     .lang-availability { font-family: var(--sans); font-size: 13px; color: var(--fg-muted); margin: 8px 0 16px; }
@@ -669,9 +680,12 @@
             ? `<div class="empty"><p>No books yet.</p><button id="btn-import-2">Import your first book</button></div>`
             : books.map(b => `
               <article class="book-card" data-id="${escapeHtml(b.id)}">
-                <button class="book-delete" data-id="${escapeHtml(b.id)}" title="Delete this book (irreversible)">&#128465;</button>
+                <div class="book-actions">
+                  <button class="book-edit" data-id="${escapeHtml(b.id)}" title="Edit book title, author, description">&#9998;</button>
+                  <button class="book-delete" data-id="${escapeHtml(b.id)}" title="Delete this book (irreversible)">&#128465;</button>
+                </div>
                 <h2>${escapeHtml(b.title)}</h2>
-                <p class="author">${escapeHtml(b.author || '')}</p>
+                <p class="author">${escapeHtml(b.author || '')}${b.description ? '<br><small>' + escapeHtml(b.description) + '</small>' : ''}</p>
                 <p class="meta">${escapeHtml(b.chapterCount ?? 0)} chapters</p>
                 <button class="continue" data-id="${escapeHtml(b.id)}">&#9654; Continue</button>
               </article>`).join('')}
@@ -680,10 +694,16 @@
       document.getElementById('btn-import-2')?.addEventListener('click', () => nav('import'));
       document.getElementById('btn-vocab')?.addEventListener('click', () => nav('vocab'));
       document.getElementById('btn-settings')?.addEventListener('click', () => nav('settings'));
-      // Card click opens book; but IGNORE clicks that came from the delete button
+      // Card click opens book; but IGNORE clicks that came from the actions bar
       el.querySelectorAll('.book-card').forEach(c => c.addEventListener('click', (ev) => {
-        if (ev.target.closest('.book-delete')) return;
+        if (ev.target.closest('.book-actions')) return;
         nav('book', { id: c.dataset.id });
+      }));
+      // Edit button on each card → jump to book detail in edit mode via location state.
+      // Simpler: nav to book, book route reads a `?edit=1` flag by extending nav params.
+      el.querySelectorAll('.book-edit').forEach(btn => btn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        nav('book', { id: btn.dataset.id, edit: true });
       }));
       // Delete button on each card: confirm → cascade delete (chapters + text + audio)
       el.querySelectorAll('.book-delete').forEach(btn => btn.addEventListener('click', async (ev) => {
@@ -1198,33 +1218,102 @@
     });
 
     // ============ Book detail screen ============
-    route('book', async (el, { id }) => {
+    route('book', async (el, { id, edit }) => {
       const book = await Storage.books.get(id);
       const chs = await Storage.chapters.list(id);
-      el.innerHTML = `
+
+      // Language chip visibility helpers per chapter
+      const chipsFor = (c) => {
+        const out = [];
+        out.push(escapeHtml(book.sourceLang.toUpperCase()));
+        if (c.versions?.es && Object.keys(c.versions.es).length) out.push('ES');
+        if (c.versions?.en) out.push('EN');
+        if (c.versions?.pt) out.push('PT');
+        if (Object.values(c.voiced || {}).some(v => v)) out.push('&#9205;');
+        if (c.positionFraction > 0.02) out.push(Math.round(c.positionFraction * 100) + '%');
+        return out;
+      };
+
+      const renderView = () => `
         <header class="topbar">
           <button id="btn-back-library">&#8592;</button>
-          <div>
+          <div class="book-heading" id="book-heading-view">
             <h1>${escapeHtml(book.title)}</h1>
-            <p class="author">${escapeHtml(book.author || '')}</p>
+            <p class="author">${escapeHtml(book.author || '')}${book.description ? ' &middot; ' + escapeHtml(book.description) : ''}</p>
+          </div>
+          <button id="btn-edit-book" class="icon-btn" title="Edit book details">&#9998;</button>
+        </header>
+        <main class="book-detail">
+          <ol class="chapters">
+            ${chs.map(c => `<li data-cid="${escapeHtml(c.id)}"><span class="ch-idx">${c.index + 1}</span><span class="ch-title">${escapeHtml(c.title)}</span><span class="chips">${chipsFor(c).map(x => `<span class="chip">${x}</span>`).join('')}</span></li>`).join('')}
+          </ol>
+        </main>`;
+
+      const renderEdit = () => `
+        <header class="topbar">
+          <button id="btn-back-library">&#8592;</button>
+          <div class="book-heading edit-mode" id="book-heading-edit">
+            <div class="edit-field"><label>Title <input id="edit-title" type="text" value="${escapeHtml(book.title)}"></label></div>
+            <div class="edit-field"><label>Author <input id="edit-author" type="text" value="${escapeHtml(book.author || '')}"></label></div>
+            <div class="edit-field"><label>Description <textarea id="edit-description" rows="2" placeholder="Optional — appears next to author">${escapeHtml(book.description || '')}</textarea></label></div>
+            <div class="edit-actions">
+              <button id="btn-save-book" class="cta-generate">Save</button>
+              <button id="btn-cancel-edit" class="secondary">Cancel</button>
+            </div>
           </div>
         </header>
         <main class="book-detail">
           <ol class="chapters">
-            ${chs.map(c => {
-              const chips = [];
-              chips.push(escapeHtml(book.sourceLang.toUpperCase()));
-              if (c.versions?.es && Object.keys(c.versions.es).length) chips.push('ES');
-              if (Object.values(c.voiced || {}).some(v => v)) chips.push('&#9205;');
-              if (c.positionFraction > 0.02) chips.push(Math.round(c.positionFraction * 100) + '%');
-              return `<li data-cid="${escapeHtml(c.id)}"><span class="ch-idx">${c.index + 1}</span><span class="ch-title">${escapeHtml(c.title)}</span><span class="chips">${chips.map(x => `<span class="chip">${x}</span>`).join('')}</span></li>`;
-            }).join('')}
+            ${chs.map(c => `<li data-cid="${escapeHtml(c.id)}"><span class="ch-idx">${c.index + 1}</span><span class="ch-title">${escapeHtml(c.title)}</span><span class="chips">${chipsFor(c).map(x => `<span class="chip">${x}</span>`).join('')}</span></li>`).join('')}
           </ol>
         </main>`;
-      el.querySelector('#btn-back-library').addEventListener('click', () => nav('library'));
-      el.querySelectorAll('li[data-cid]').forEach(li =>
-        li.addEventListener('click', () => nav('reader', { chapterId: li.dataset.cid }))
-      );
+
+      const wireCommon = () => {
+        el.querySelector('#btn-back-library').addEventListener('click', () => nav('library'));
+        el.querySelectorAll('li[data-cid]').forEach(li =>
+          li.addEventListener('click', () => nav('reader', { chapterId: li.dataset.cid }))
+        );
+      };
+
+      const showView = () => {
+        el.innerHTML = renderView();
+        wireCommon();
+        el.querySelector('#btn-edit-book').addEventListener('click', showEdit);
+      };
+      const showEdit = () => {
+        el.innerHTML = renderEdit();
+        wireCommon();
+        const titleInput = el.querySelector('#edit-title');
+        const authorInput = el.querySelector('#edit-author');
+        const descInput = el.querySelector('#edit-description');
+        titleInput.focus();
+        titleInput.select();
+        const cancel = () => showView();
+        const save = async () => {
+          const newTitle = titleInput.value.trim();
+          if (!newTitle) { alert('Title cannot be empty'); titleInput.focus(); return; }
+          const newAuthor = authorInput.value.trim();
+          const newDescription = descInput.value.trim();
+          // Mutate + persist. Note: chapterCount / chapters are preserved (put doesn't touch chapter data).
+          book.title = newTitle;
+          book.author = newAuthor;
+          book.description = newDescription;
+          await Storage.books.put(book);
+          showView();
+        };
+        el.querySelector('#btn-cancel-edit').addEventListener('click', cancel);
+        el.querySelector('#btn-save-book').addEventListener('click', save);
+        // Keyboard: Enter on title/author saves; Esc cancels
+        [titleInput, authorInput].forEach(inp => inp.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+          if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+        }));
+        descInput.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+        });
+      };
+
+      if (edit) showEdit(); else showView();
     });
 
     // ============ Translation generator (any target language) ============
