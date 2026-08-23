@@ -355,7 +355,7 @@ async function runFlow(page) {
     if (!popVisible) fail('popover appears on word tap', 'not visible');
     else {
       pass('popover visible on word tap');
-      for (const sel of ['#pop-play-word', '#pop-play-sent', '#pop-play-para']) {
+      for (const sel of ['#pop-play-word', '#pop-jump-sent', '#pop-jump-para']) {
         const has = await page.locator(sel).isVisible().catch(() => false);
         if (has) pass(`popover has ${sel}`); else fail(`popover ${sel}`, 'missing');
       }
@@ -364,7 +364,7 @@ async function runFlow(page) {
       // wiring without racing the animation.
       const btnClickResults = await page.evaluate(() => {
         const results = {};
-        for (const id of ['pop-play-word', 'pop-play-sent', 'pop-play-para']) {
+        for (const id of ['pop-play-word', 'pop-jump-sent', 'pop-jump-para']) {
           const btn = document.getElementById(id);
           if (!btn) { results[id] = 'missing'; continue; }
           try {
