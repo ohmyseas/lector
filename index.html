@@ -281,13 +281,7 @@
       background: #d5e8de;
       color: var(--accent);
     }
-    .play-btn {
-      background: transparent;
-      color: var(--fg-muted);
-      padding: var(--sp-2) var(--sp-3);
-      opacity: 0.4;
-      cursor: default;
-    }
+    /* .play-btn styles moved to RWL Playback section below */
     .reader {
       max-width: var(--max-w);
       margin: 0 auto;
@@ -345,6 +339,14 @@
     }
     .voice-btn:hover:not(:disabled) { background: var(--accent-h); }
     .voice-btn:disabled { opacity: 0.6; cursor: default; }
+
+    /* ===== RWL Playback ===== */
+    .sent.playing { background: #fff7d0; border-radius: 3px; }
+    .wnow { border-bottom: 2px solid var(--accent); }
+    .play-btn { font-size: 18px; padding: 4px 12px; background: transparent; color: var(--fg-muted); }
+    .play-btn:hover:not(:disabled) { background: var(--border); color: var(--fg); }
+    .play-btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+    .speed { font-family: var(--sans); font-size: 0.8rem; padding: 3px 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--fg); cursor: pointer; }
 
     /* ===== Responsive ===== */
     @media (max-width: 480px) {
@@ -674,6 +676,73 @@
       await Storage.chapters.put(updated);
     }
 
+    // ============ RWL Playback Engine ============
+    const Player = {
+      audioEl: null, chapter: null, book: null, sentences: [], voiceId: null, idx: 0, timings: [], speed: 1, saveTimer: null,
+      async start(chapter, book, fromIdx = 0) {
+        this.stop();
+        const voiceId = book.narratorVoice || 'narrator';
+        // Self-guard: refuse to start if chapter has no voiced audio for this voice
+        if (!chapter.voiced?.[voiceId]) {
+          console.warn('[Player] chapter not voiced for', voiceId);
+          return;
+        }
+        this.chapter = chapter; this.book = book; this.voiceId = voiceId;
+        const body = chapter.versions?.es?.B1 || chapter.versions?.[book.sourceLang] || chapter.sourceText;
+        this.sentences = splitParagraphs(body).flatMap(splitSentences);
+        this.idx = fromIdx;
+        this.audioEl = new Audio();
+        this.audioEl.playbackRate = this.speed;
+        this.audioEl.addEventListener('ended', () => this._next());
+        this.audioEl.addEventListener('timeupdate', () => this._highlightWord());
+        this._play();
+        this.saveTimer = setInterval(() => this._savePos(), 5000);
+      },
+      async _play() {
+        if (this.idx >= this.sentences.length) return this.stop();
+        const s = this.sentences[this.idx];
+        const hash = await sentenceHash(s + '|' + this.voiceId);
+        const rec = await Storage.audio.get(this.chapter.id, hash, this.voiceId);
+        if (!rec) { console.warn('[Player] missing audio for sentence', this.idx); return this._next(); }
+        this.timings = rec.timings || [];
+        if (this.audioEl.src) URL.revokeObjectURL(this.audioEl.src);
+        this.audioEl.src = URL.createObjectURL(rec.blob);
+        document.querySelectorAll('.sent.playing').forEach(x => x.classList.remove('playing'));
+        const sentEl = document.querySelector(`.sent[data-sent="${this.idx}"]`);
+        if (sentEl) { sentEl.classList.add('playing'); sentEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        await this.audioEl.play();
+      },
+      _next() { this.idx++; this._savePos(); this._play(); },
+      _highlightWord() {
+        const t = this.audioEl.currentTime;
+        const w = this.timings.find(x => t >= x.startSec && t <= x.endSec);
+        document.querySelectorAll('.wnow').forEach(x => x.classList.remove('wnow'));
+        if (!w) return;
+        const sentEl = document.querySelector('.sent.playing');
+        if (!sentEl) return;
+        const spans = [...sentEl.querySelectorAll('.w')];
+        const hit = spans.find(sp => sp.textContent.replace(/[.,;:!?¡¿"'()\[\]«»—–…]/g, '').trim().toLowerCase() === w.word.toLowerCase());
+        if (hit) hit.classList.add('wnow');
+      },
+      setSpeed(s) { this.speed = s; if (this.audioEl) this.audioEl.playbackRate = s; },
+      async _savePos() {
+        if (!this.chapter) return;
+        const ch = await Storage.chapters.get(this.chapter.id);
+        if (!ch) return;
+        ch.playbackResume = { sentenceIndex: this.idx, audioTimeSec: this.audioEl?.currentTime || 0, voiceId: this.voiceId };
+        ch.positionFraction = this.sentences.length ? this.idx / this.sentences.length : 0;
+        await Storage.chapters.put({ ...ch, sourceText: ch.sourceText });
+      },
+      pause() { this.audioEl?.pause(); this._savePos(); },
+      resume() { this.audioEl?.play(); },
+      stop() {
+        if (this.saveTimer) { clearInterval(this.saveTimer); this.saveTimer = null; }
+        if (this.audioEl) { this.audioEl.pause(); if (this.audioEl.src) { URL.revokeObjectURL(this.audioEl.src); } this.audioEl = null; }
+        document.querySelectorAll('.sent.playing, .wnow').forEach(x => x.classList.remove('playing', 'wnow'));
+        this.chapter = null; this.book = null; this.sentences = []; this.timings = []; this.idx = 0;
+      }
+    };
+
     // ============ Import screen ============
     route('import', async (el) => {
       el.innerHTML = `
@@ -910,7 +979,13 @@
           <div class="pills level-pills"${displayLang === 'es' ? '' : ' hidden'}>
             ${['A2','B1','B2','C1'].map(lv => `<button data-level="${lv}" class="pill${lv === level ? ' active' : ''}">${lv}</button>`).join('')}
           </div>
-          <button class="play-btn" disabled title="Not yet implemented">&#9654;</button>
+          <button class="play-btn">&#9654;</button>
+          <select class="speed">
+            <option value="0.75">0.75&times;</option>
+            <option value="1" selected>1&times;</option>
+            <option value="1.25">1.25&times;</option>
+            <option value="1.5">1.5&times;</option>
+          </select>
         </header>
         <main class="reader">
           ${body
@@ -968,6 +1043,33 @@
           }
         });
       }
+
+      // ---- RWL: Play button + speed selector ----
+      const playBtn = el.querySelector('.play-btn');
+      const isVoiced = !!ch.voiced?.[book.narratorVoice || 'narrator'];
+      playBtn.disabled = !isVoiced;
+      playBtn.title = isVoiced ? 'Play from position' : 'Voice this chapter first';
+      playBtn.addEventListener('click', () => {
+        if (Player.audioEl && !Player.audioEl.paused) { Player.pause(); playBtn.textContent = '▶'; return; }
+        if (Player.audioEl) { Player.resume(); playBtn.textContent = '⏸'; return; }
+        const startIdx = ch.playbackResume?.sentenceIndex || 0;
+        Player.start(ch, book, startIdx);
+        playBtn.textContent = '⏸';
+      });
+      el.querySelector('.speed').addEventListener('change', (e) => Player.setSpeed(parseFloat(e.target.value)));
+
+      // ---- RWL: Alt+click plays from that sentence ----
+      el.querySelector('main.reader').addEventListener('click', (e) => {
+        if (!e.altKey) return;
+        const sent = e.target.closest('.sent');
+        if (!sent) return;
+        const idx = parseInt(sent.dataset.sent);
+        Player.start(ch, book, idx);
+        playBtn.textContent = '⏸';
+      });
+
+      // ---- Route teardown: stop player when navigating away ----
+      readerAbort.signal.addEventListener('abort', () => Player.stop());
 
       // ---- Tap-to-gloss ----
       const pop = document.getElementById('popover');
