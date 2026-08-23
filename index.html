@@ -319,6 +319,16 @@
       cursor: not-allowed;
     }
 
+    /* ===== Word popover ===== */
+    #popover { position: absolute; z-index: 100; background: var(--bg); border: 1px solid #ddd; border-radius: 8px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.12); max-width: 320px; font-family: var(--sans); font-size: 14px; }
+    .pop-word { font-size: 16px; margin-bottom: 4px; }
+    .pop-lemma { color: #888; font-size: 13px; font-style: italic; }
+    .pop-gloss { margin: 8px 0; }
+    .pop-note { color: #555; font-size: 13px; }
+    .pop-actions { margin-top: 10px; display: flex; gap: 8px; }
+    .w { cursor: pointer; }
+    .w:hover { background: #fffbe0; }
+
     /* ===== Responsive ===== */
     @media (max-width: 480px) {
       .topbar { padding: var(--sp-3) var(--sp-4); }
@@ -802,6 +812,12 @@
     }
 
     // ============ Reader screen ============
+    function renderSentence(s, i) {
+      const parts = s.split(/(\s+)/); // preserve whitespace
+      const wrapped = parts.map(p => /^\s+$/.test(p) ? p : `<span class="w">${escapeHtml(p)}</span>`).join('');
+      return `<span class="sent" data-sent="${i}">${wrapped}</span>`;
+    }
+
     route('reader', async (el, { chapterId }) => {
       const ch = await Storage.chapters.get(chapterId);
       const book = await Storage.books.get(ch.bookId);
@@ -828,12 +844,13 @@
         <main class="reader">
           ${body
             ? splitParagraphs(body).map(p =>
-                `<p>${splitSentences(p).map((s, i) => `<span class="sent" data-sent="${i}">${escapeHtml(s)}</span>`).join(' ')}</p>`
+                `<p>${splitSentences(p).map(renderSentence).join(' ')}</p>`
               ).join('')
             : `<div class="empty"><p>No text for <b>${escapeHtml(displayLang)}${displayLang === 'es' ? ' ' + escapeHtml(level) : ''}</b> yet.</p>
                ${displayLang === 'es'
                  ? `<button id="btn-generate">Generate ES ${escapeHtml(level)}</button><div id="gen-progress"></div>`
                  : `<p><i>Only Spanish generation is supported. Import an English or Russian version manually if needed.</i></p>`}</div>`}
+          <div id="popover" hidden></div>
         </main>`;
 
       el.querySelector('#btn-back-book').addEventListener('click', () => nav('book', { id: book.id }));
@@ -859,6 +876,65 @@
           e.target.disabled = false;
         }
       });
+
+      // ---- Tap-to-gloss ----
+      const pop = document.getElementById('popover');
+      if (pop) {
+        el.querySelector('main.reader').addEventListener('click', async (e) => {
+          const w = e.target.closest('.w');
+          if (!w) { pop.hidden = true; return; }
+          const sent = w.closest('.sent');
+          const word = w.textContent.replace(/[.,;:!?¡¿"'()\[\]«»—–…]/g, '').trim();
+          if (!word) return;
+          const sentence = sent.textContent.trim();
+          pop.hidden = false;
+          pop.innerHTML = `<div class="pop-loading">Looking up &#8220;${escapeHtml(word)}&#8221;&#8230;</div>`;
+          const rect = w.getBoundingClientRect();
+          pop.style.left = Math.max(8, Math.min(window.innerWidth - 320, rect.left)) + 'px';
+          pop.style.top = (window.scrollY + rect.bottom + 6) + 'px';
+
+          try {
+            const r = await fetch('/api/llm', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                task: 'gloss',
+                input: { tappedWord: word, sentence, displayLang },
+                glossary: book.glossary || [],
+                bookMeta: { title: book.title, author: book.author, sourceLang: book.sourceLang }
+              })
+            });
+            const j = await r.json();
+            if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+            const g = j.result;
+            pop.innerHTML = `
+              <div class="pop-word"><b>${escapeHtml(g.word)}</b> <span class="pop-lemma">(${escapeHtml(g.lemma)})</span></div>
+              <div class="pop-gloss">${escapeHtml(g.gloss)}</div>
+              <div class="pop-note">${escapeHtml(g.note || '')}</div>
+              <div class="pop-actions">
+                <button id="pop-save">+ save</button>
+                <button id="pop-close">&#10005;</button>
+              </div>`;
+            document.getElementById('pop-save').addEventListener('click', async () => {
+              await Storage.vocab.put({
+                word: g.word, lemma: g.lemma, gloss: g.gloss, sourceSentence: sentence,
+                bookId: book.id, chapterId: ch.id, displayLangAtSave: displayLang, exported: false
+              });
+              const btn = document.getElementById('pop-save');
+              if (btn) btn.textContent = '✓ saved';
+            });
+            document.getElementById('pop-close').addEventListener('click', () => { pop.hidden = true; });
+          } catch (err) {
+            pop.innerHTML = `<div class="pop-error">${escapeHtml(err.message)}</div>`;
+          }
+        });
+
+        // Dismiss on scroll or outside click
+        document.addEventListener('scroll', () => { pop.hidden = true; }, { passive: true });
+        document.addEventListener('mousedown', (e) => {
+          if (!pop.contains(e.target) && !e.target.closest('.w')) pop.hidden = true;
+        });
+      }
     });
 
     // stubs so nav() doesn't throw before those screens exist
