@@ -187,11 +187,144 @@
     }
     .stub button { margin-top: var(--sp-4); }
 
+    /* ===== Book detail ===== */
+    .book-detail {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: var(--sp-6);
+    }
+    .book-detail .author {
+      font-size: 0.875rem;
+      color: var(--fg-muted);
+      margin-top: var(--sp-1);
+    }
+    .chapters {
+      list-style: none;
+      margin-top: var(--sp-6);
+      display: flex;
+      flex-direction: column;
+      gap: var(--sp-2);
+    }
+    .chapters li {
+      display: flex;
+      align-items: center;
+      gap: var(--sp-3);
+      padding: var(--sp-3) var(--sp-4);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: box-shadow 0.15s, transform 0.1s;
+    }
+    .chapters li:hover {
+      box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+      transform: translateY(-1px);
+    }
+    .ch-idx {
+      font-size: 0.75rem;
+      color: var(--fg-muted);
+      min-width: 1.5rem;
+      text-align: right;
+    }
+    .ch-title {
+      flex: 1;
+      font-family: var(--serif);
+      font-size: 0.95rem;
+    }
+    .chips {
+      display: flex;
+      gap: var(--sp-1);
+      flex-shrink: 0;
+    }
+    .chip {
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--border);
+      color: var(--fg-muted);
+    }
+
+    /* ===== Reader ===== */
+    .reader-topbar {
+      flex-wrap: wrap;
+      gap: var(--sp-2);
+    }
+    .crumbs {
+      flex: 1;
+      font-size: 0.875rem;
+      color: var(--fg-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pills {
+      display: flex;
+      gap: 4px;
+    }
+    .pill {
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 4px;
+      background: var(--border);
+      color: var(--fg-muted);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+    .pill.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .pill:hover:not(.active) {
+      background: #d5e8de;
+      color: var(--accent);
+    }
+    .play-btn {
+      background: transparent;
+      color: var(--fg-muted);
+      padding: var(--sp-2) var(--sp-3);
+      opacity: 0.4;
+      cursor: default;
+    }
+    .reader {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: var(--sp-8) var(--sp-6);
+      font-family: var(--serif);
+      font-size: 1.125rem;
+      line-height: 1.8;
+    }
+    .reader p {
+      margin-bottom: var(--sp-6);
+    }
+    .sent {
+      border-radius: 3px;
+    }
+    .sent:hover {
+      background: rgba(45,106,79,0.08);
+    }
+    .reader .empty {
+      grid-column: unset;
+      text-align: left;
+    }
+    .reader .empty p {
+      font-family: var(--serif);
+      color: var(--fg-muted);
+    }
+    .reader .empty button {
+      margin-top: var(--sp-4);
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
     /* ===== Responsive ===== */
     @media (max-width: 480px) {
       .topbar { padding: var(--sp-3) var(--sp-4); }
       .library { padding: var(--sp-6) var(--sp-4); gap: var(--sp-4); }
       .topbar h1 { font-size: 1.25rem; }
+      .reader { padding: var(--sp-6) var(--sp-4); font-size: 1rem; }
     }
   </style>
 </head>
@@ -446,6 +579,23 @@
     }
     window.splitIntoChapters = splitIntoChapters;
 
+    // ============ Sentence / paragraph splitters ============
+    function splitSentences(text) {
+      // Prefer Intl.Segmenter if available
+      if (typeof Intl !== 'undefined' && Intl.Segmenter) {
+        try {
+          const seg = new Intl.Segmenter('es', { granularity: 'sentence' });
+          return [...seg.segment(text)].map(s => s.segment.trim()).filter(Boolean);
+        } catch {}
+      }
+      // Regex fallback: sentence-terminal punctuation followed by whitespace
+      return text.split(/(?<=[.!?…])\s+(?=[A-ZА-ЯÁÉÍÓÚÑ¿¡])/).map(s => s.trim()).filter(Boolean);
+    }
+
+    function splitParagraphs(text) {
+      return text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+    }
+
     // ============ Import screen ============
     route('import', async (el) => {
       el.innerHTML = `
@@ -574,8 +724,81 @@
       });
     });
 
+    // ============ Book detail screen ============
+    route('book', async (el, { id }) => {
+      const book = await Storage.books.get(id);
+      const chs = await Storage.chapters.list(id);
+      el.innerHTML = `
+        <header class="topbar">
+          <button id="btn-back-library">&#8592;</button>
+          <div>
+            <h1>${escapeHtml(book.title)}</h1>
+            <p class="author">${escapeHtml(book.author || '')}</p>
+          </div>
+        </header>
+        <main class="book-detail">
+          <ol class="chapters">
+            ${chs.map(c => {
+              const chips = [];
+              chips.push(escapeHtml(book.sourceLang.toUpperCase()));
+              if (c.versions?.es && Object.keys(c.versions.es).length) chips.push('ES');
+              if (Object.values(c.voiced || {}).some(v => v)) chips.push('&#9205;');
+              if (c.positionFraction > 0.02) chips.push(Math.round(c.positionFraction * 100) + '%');
+              return `<li data-cid="${escapeHtml(c.id)}"><span class="ch-idx">${c.index + 1}</span><span class="ch-title">${escapeHtml(c.title)}</span><span class="chips">${chips.map(x => `<span class="chip">${x}</span>`).join('')}</span></li>`;
+            }).join('')}
+          </ol>
+        </main>`;
+      el.querySelector('#btn-back-library').addEventListener('click', () => nav('library'));
+      el.querySelectorAll('li[data-cid]').forEach(li =>
+        li.addEventListener('click', () => nav('reader', { chapterId: li.dataset.cid }))
+      );
+    });
+
+    // ============ Reader screen ============
+    route('reader', async (el, { chapterId }) => {
+      const ch = await Storage.chapters.get(chapterId);
+      const book = await Storage.books.get(ch.bookId);
+      const displayLang = await Storage.settings.get('displayLang:' + book.id, book.sourceLang);
+      const level = await Storage.settings.get('level:' + book.id, 'B1');
+
+      // Pick text body
+      let body;
+      if (displayLang === 'es') body = ch.versions?.es?.[level] || null;
+      else body = ch.versions?.[displayLang] || null;
+
+      el.innerHTML = `
+        <header class="topbar reader-topbar">
+          <button id="btn-back-book">&#8592;</button>
+          <div class="crumbs">${escapeHtml(book.title)} &middot; ${escapeHtml(ch.title)}</div>
+          <div class="pills lang-pills">
+            ${['ru','en','es'].map(l => `<button data-lang="${l}" class="pill${l === displayLang ? ' active' : ''}">${l.toUpperCase()}</button>`).join('')}
+          </div>
+          <div class="pills level-pills"${displayLang === 'es' ? '' : ' hidden'}>
+            ${['A2','B1','B2','C1'].map(lv => `<button data-level="${lv}" class="pill${lv === level ? ' active' : ''}">${lv}</button>`).join('')}
+          </div>
+          <button class="play-btn" disabled title="Not yet implemented">&#9654;</button>
+        </header>
+        <main class="reader">
+          ${body
+            ? splitParagraphs(body).map(p =>
+                `<p>${splitSentences(p).map((s, i) => `<span class="sent" data-sent="${i}">${escapeHtml(s)}</span>`).join(' ')}</p>`
+              ).join('')
+            : `<div class="empty"><p>No text for <b>${escapeHtml(displayLang)}${displayLang === 'es' ? ' ' + escapeHtml(level) : ''}</b> yet.</p>
+               <button disabled>Generate (Task 7 wires this up)</button></div>`}
+        </main>`;
+
+      el.querySelector('#btn-back-book').addEventListener('click', () => nav('book', { id: book.id }));
+      el.querySelectorAll('.lang-pills .pill').forEach(p => p.addEventListener('click', async () => {
+        await Storage.settings.set('displayLang:' + book.id, p.dataset.lang);
+        nav('reader', { chapterId });
+      }));
+      el.querySelectorAll('.level-pills .pill').forEach(p => p.addEventListener('click', async () => {
+        await Storage.settings.set('level:' + book.id, p.dataset.level);
+        nav('reader', { chapterId });
+      }));
+    });
+
     // stubs so nav() doesn't throw before those screens exist
-    route('book',     (el) => { el.innerHTML = '<div class="stub"><p>Book detail (stub)</p><button onclick="nav(\'library\')">&#8592; Back</button></div>'; });
     route('vocab',    (el) => { el.innerHTML = '<div class="stub"><p>Vocab (stub)</p><button onclick="nav(\'library\')">&#8592; Back</button></div>'; });
     route('settings', (el) => { el.innerHTML = '<div class="stub"><p>Settings (stub)</p><button onclick="nav(\'library\')">&#8592; Back</button></div>'; });
 
