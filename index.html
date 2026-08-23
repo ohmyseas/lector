@@ -1495,8 +1495,7 @@
           }
         });
 
-        // Dismiss on scroll or outside click
-        document.addEventListener('scroll', () => { pop.hidden = true; }, { passive: true, signal: readerAbort.signal });
+        // Dismiss on outside click only (popover is position:fixed, so scroll doesn't require dismiss)
         document.addEventListener('mousedown', (e) => {
           if (!pop.contains(e.target) && !e.target.closest('.w')) pop.hidden = true;
         }, { signal: readerAbort.signal });
