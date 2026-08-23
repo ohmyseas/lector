@@ -847,6 +847,7 @@
       },
       _next() { this.idx++; this._savePos(); this._play().catch(err => { console.error('[Player]', err); this.stop(); }); },
       _highlightWord() {
+        if (!this.audioEl) return;   // guard: stop() may have nulled audioEl mid-fire
         const t = this.audioEl.currentTime;
         const w = this.timings.find(x => t >= x.startSec && t <= x.endSec);
         document.querySelectorAll('.wnow').forEach(x => x.classList.remove('wnow'));
