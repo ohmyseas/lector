@@ -988,7 +988,63 @@
     });
 
     // stubs so nav() doesn't throw before those screens exist
-    route('vocab',    (el) => { el.innerHTML = '<div class="stub"><p>Vocab (stub)</p><button onclick="nav(\'library\')">&#8592; Back</button></div>'; });
+    route('vocab', async (el) => {
+      const books = await Storage.books.list();
+      const all = await Storage.vocab.list();
+      const filterId = await Storage.settings.get('vocabFilter', '');
+      const shown = filterId ? all.filter(v => v.bookId === filterId) : all;
+      const emptyRow = shown.length === 0
+        ? '<tr><td colspan="6"><em>No vocab saved yet.</em></td></tr>'
+        : shown.map(v => {
+            const bookTitle = books.find(b => b.id === v.bookId)?.title || '';
+            return `<tr data-id="${escapeHtml(v.id)}">
+              <td><b>${escapeHtml(v.word)}</b></td>
+              <td>${escapeHtml(v.lemma || '')}</td>
+              <td>${escapeHtml(v.gloss)}</td>
+              <td class="src">${escapeHtml(v.sourceSentence)}</td>
+              <td>${escapeHtml(bookTitle)}</td>
+              <td><button class="del">&#10005;</button></td>
+            </tr>`;
+          }).join('');
+      el.innerHTML = `
+        <header class="topbar"><button onclick="nav('library')">&#8592;</button><h1>Vocab (${shown.length})</h1>
+          <select id="vf">
+            <option value="">All books</option>
+            ${books.map(b => `<option value="${escapeHtml(b.id)}" ${b.id===filterId?'selected':''}>${escapeHtml(b.title)}</option>`).join('')}
+          </select>
+          <button id="vx">Export TSV &rarr; clipboard</button>
+        </header>
+        <main class="vocab-list">
+          <table>
+            <thead><tr><th>Word</th><th>Lemma</th><th>Gloss</th><th>Source sentence</th><th>Book</th><th></th></tr></thead>
+            <tbody>${emptyRow}</tbody>
+          </table>
+        </main>`;
+      document.getElementById('vf').addEventListener('change', async (e) => {
+        await Storage.settings.set('vocabFilter', e.target.value);
+        nav('vocab');
+      });
+      document.getElementById('vx').addEventListener('click', async () => {
+        const tsv = shown.map(v => {
+          const book = books.find(b => b.id === v.bookId);
+          const ch = v.chapterId;
+          return [v.word, v.gloss, v.sourceSentence.replace(/\t/g, ' '), book?.title || '', ch || ''].join('\t');
+        }).join('\n');
+        try {
+          await navigator.clipboard.writeText(tsv);
+          document.getElementById('vx').textContent = '✓ copied ' + shown.length + ' rows';
+        } catch (err) {
+          document.getElementById('vx').textContent = 'Clipboard denied — select & copy manually';
+        }
+        setTimeout(() => nav('vocab'), 1500);
+      });
+      el.querySelectorAll('tr[data-id] .del').forEach(btn => btn.addEventListener('click', async (e) => {
+        const row = e.target.closest('tr');
+        const id = row.dataset.id;
+        const v = all.find(x => x.id === id);
+        if (v) { await Storage.vocab.delete(v.word, v.bookId); nav('vocab'); }
+      }));
+    });
     route('settings', (el) => { el.innerHTML = '<div class="stub"><p>Settings (stub)</p><button onclick="nav(\'library\')">&#8592; Back</button></div>'; });
 
     window.Storage = Storage;
