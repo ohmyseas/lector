@@ -647,10 +647,12 @@
       let prevReqIds = [];
       for (let i = 0; i < sentences.length; i++) {
         const s = sentences[i];
-        onProgress?.(i, sentences.length);
         const hash = await sentenceHash(s + '|' + voiceId);
         const existing = await Storage.audio.get(chapter.id, hash, voiceId);
-        if (existing) continue;
+        if (existing) {
+          onProgress?.(i + 1, sentences.length);
+          continue;
+        }
         const r = await fetch('/api/tts', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -664,6 +666,7 @@
         const blob = base64ToBlob(j.audioBase64);
         await Storage.audio.put(chapter.id, hash, voiceId, { blob, timings: j.timings });
         if (j.requestId) prevReqIds.push(j.requestId);
+        onProgress?.(i + 1, sentences.length);
       }
       onProgress?.(sentences.length, sentences.length);
       const updated = await Storage.chapters.get(chapter.id);
@@ -953,7 +956,7 @@
         el.querySelector('.reader-topbar').appendChild(voiceBtn);
         voiceBtn.addEventListener('click', async () => {
           voiceBtn.disabled = true;
-          voiceBtn.textContent = 'Voicing 0%...';
+          voiceBtn.textContent = 'Voicing…';
           try {
             await voiceChapter(ch, book, book.narratorVoice || 'narrator', (d, t) => {
               voiceBtn.textContent = `Voicing ${Math.round(100 * d / t)}% (${d}/${t})`;
