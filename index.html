@@ -352,6 +352,14 @@
     .pop-play-row { display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
     .pop-play-row button { font-size: 12px; padding: 4px 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
     .pop-play-row button:hover { background: var(--border); }
+    .pill.has-content { border-color: var(--accent); color: var(--fg); }
+    .pill .pill-dot { color: var(--accent); font-size: 14px; line-height: 1; margin-left: 2px; vertical-align: 0; }
+    .lang-availability { font-family: var(--sans); font-size: 13px; color: var(--fg-muted); margin: 8px 0 16px; }
+    .lang-chip-mini { display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--bg-card); border: 1px solid var(--accent); font-size: 12px; margin-right: 4px; color: var(--fg); font-weight: 500; }
+    .cta-generate { font-size: 15px; padding: 10px 20px; background: var(--accent); color: white; border: none; border-radius: 6px; cursor: pointer; margin: 8px 0; font-family: var(--sans); }
+    .cta-generate:hover:not(:disabled) { filter: brightness(1.05); }
+    .cta-generate:disabled { opacity: 0.5; cursor: wait; }
+    .empty-title { font-size: 15px; margin-bottom: 8px; color: var(--fg); }
 
     /* ===== Recite mode ===== */
     .sent.reciting { outline: 2px dashed #b89b62; }
@@ -844,6 +852,8 @@
       audioEl: null, chapter: null, book: null, sentences: [], key: null, idx: 0, timings: [], speed: 1, saveTimer: null,
       async start(chapter, book, targetLang, level, fromIdx = 0) {
         this.stop();
+        // Kill any orphan ephemeral audio too — otherwise word/sentence popover audio would play in parallel with RWL.
+        if (typeof EphemeralAudio !== 'undefined') EphemeralAudio.stop();
         const key = voiceKey(targetLang, level);
         if (!chapter.voiced?.[key]) {
           console.warn('[Player] chapter not voiced for', key);
@@ -914,13 +924,53 @@
         if (this.audioEl) { this.audioEl.pause(); if (this.audioEl.src) { URL.revokeObjectURL(this.audioEl.src); } this.audioEl = null; }
         document.querySelectorAll('.sent.playing, .wnow').forEach(x => x.classList.remove('playing', 'wnow'));
         this.chapter = null; this.book = null; this.sentences = []; this.timings = []; this.idx = 0; this.key = null;
+        // Also nuke any orphan ephemeral audio so the ⏹ button truly stops EVERYTHING
+        if (typeof EphemeralAudio !== 'undefined') EphemeralAudio.stop();
       },
-      isPlaying() { return !!(this.audioEl && !this.audioEl.paused); }
+      isPlaying() { return !!(this.audioEl && !this.audioEl.paused); },
+      isAnythingPlaying() {
+        return this.isPlaying() || !!(typeof EphemeralAudio !== 'undefined' && EphemeralAudio.audioEl && !EphemeralAudio.audioEl.paused);
+      }
     };
     window.Player = Player;   // expose for E2E + debugging
 
+    // Ephemeral audio singleton — holds the one-off Audio element used by playWord/playSentence.
+    // Ensures we never leave an orphaned Audio running when starting a new one.
+    const EphemeralAudio = {
+      audioEl: null,
+      _stopHandler: null,
+      stop() {
+        if (this.audioEl) {
+          try { this.audioEl.pause(); } catch {}
+          if (this._stopHandler) {
+            this.audioEl.removeEventListener('timeupdate', this._stopHandler);
+            this._stopHandler = null;
+          }
+          if (this.audioEl.src) { try { URL.revokeObjectURL(this.audioEl.src); } catch {} }
+          this.audioEl = null;
+        }
+      },
+      set(audio, stopHandler = null) {
+        this.stop();
+        this.audioEl = audio;
+        this._stopHandler = stopHandler;
+      }
+    };
+
+    // Kills ALL active playback — the RWL Player AND any ephemeral audio.
+    // Used before starting any new playback so nothing plays in parallel and the stop button is authoritative.
+    function stopAllPlayback() {
+      try { Player.stop(); } catch {}
+      EphemeralAudio.stop();
+      // Also clear any leftover visual highlight from either source
+      document.querySelectorAll('.sent.playing, .wnow').forEach(x => x.classList.remove('playing', 'wnow'));
+    }
+    window.stopAllPlayback = stopAllPlayback;
+
     // Play just ONE word — prefers cached sentence audio (seek+stop between timings), falls back to Flash TTS.
+    // Always stops any current playback first so there's never parallel audio.
     async function playWord(chapterId, sentence, wordText, voiceKeyStr, lang) {
+      stopAllPlayback();
       const clean = wordText.replace(/[.,;:!?¡¿"'()\[\]«»—–…]/g, '').toLowerCase().trim();
       if (!clean) return;
       // Try cached slice first
@@ -934,13 +984,10 @@
             audio.currentTime = w.startSec;
             const endTime = w.endSec + 0.05;
             const onTime = () => {
-              if (audio.currentTime >= endTime) {
-                audio.pause();
-                audio.removeEventListener('timeupdate', onTime);
-                URL.revokeObjectURL(audio.src);
-              }
+              if (audio.currentTime >= endTime) EphemeralAudio.stop();
             };
             audio.addEventListener('timeupdate', onTime);
+            EphemeralAudio.set(audio, onTime);
             await audio.play();
             return;
           }
@@ -954,10 +1001,15 @@
       });
       if (!r.ok) return;
       const blob = await r.blob();
-      new Audio(URL.createObjectURL(blob)).play();
+      const audio = new Audio(URL.createObjectURL(blob));
+      EphemeralAudio.set(audio);
+      audio.play();
     }
 
+    // Play arbitrary text (sentence / paragraph / anything) via Flash TTS in the given lang.
+    // Always stops any current playback first so there's never parallel audio.
     async function playSentence(text, lang) {
+      stopAllPlayback();
       const r = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -965,7 +1017,9 @@
       });
       if (!r.ok) return;
       const blob = await r.blob();
-      new Audio(URL.createObjectURL(blob)).play();
+      const audio = new Audio(URL.createObjectURL(blob));
+      EphemeralAudio.set(audio);
+      audio.play();
     }
 
     // ============ Import screen ============
@@ -1218,22 +1272,37 @@
       else body = ch.versions?.[displayLang] || null;
 
       const isSourceLang = displayLang === book.sourceLang;
-      const langLabelFull = displayLang === 'es' ? `Spanish (${level})` : ({
-        ru: 'Russian', en: 'English', pt: 'Portuguese', es: 'Spanish'
-      }[displayLang] || displayLang.toUpperCase());
+      const LANG_NAMES = { ru: 'Russian', en: 'English', pt: 'Portuguese', es: 'Spanish' };
+      const langLabelFull = displayLang === 'es' ? `Spanish (${level})` : (LANG_NAMES[displayLang] || displayLang.toUpperCase());
+
+      // Compute which languages already have content for THIS chapter → visual hint on pills.
+      const langHasContent = {
+        ru: !!ch.versions?.ru,
+        en: !!ch.versions?.en,
+        pt: !!ch.versions?.pt,
+        es: !!(ch.versions?.es && Object.keys(ch.versions.es).length)
+      };
+      const availableLangs = Object.entries(langHasContent).filter(([_, v]) => v).map(([k]) => k);
 
       let sIdx = 0;
+      // Available-languages line for the empty state
+      const availableLangsChip = availableLangs.length
+        ? `<p class="lang-availability">Already generated for this chapter: ${availableLangs.map(l =>
+            `<span class="lang-chip-mini">${l === 'es' ? 'ES ' + Object.keys(ch.versions?.es || {}).join('/') : l.toUpperCase()}</span>`
+          ).join(' ')}</p>`
+        : '';
       const paragraphsHtml = body
         ? splitParagraphs(body).map(p =>
             `<p>${splitSentences(p).map(s => renderSentence(s, sIdx++)).join(' ')}</p>`
           ).join('')
         : `<div class="empty">
-             <p>No <b>${escapeHtml(langLabelFull)}</b> text for this chapter yet.</p>
+             <p class="empty-title">No <b>${escapeHtml(langLabelFull)}</b> yet for this chapter.</p>
+             ${availableLangsChip}
              ${isSourceLang
                ? `<p><i>This is the source language — the original text should already be here. Try re-importing the book.</i></p>`
-               : `<button id="btn-generate">Generate ${escapeHtml(langLabelFull)}</button>
+               : `<button id="btn-generate" class="cta-generate">Generate ${escapeHtml(langLabelFull)}</button>
                   <div id="gen-progress"></div>
-                  <p class="hint"><small>Paragraph-by-paragraph LLM translation. Saves every 5 paragraphs to your browser (IndexedDB). If it errors mid-way, click Generate again to resume from where it stopped. Read/re-read costs zero after — the text is cached forever locally.</small></p>`}
+                  <p class="hint"><small>Paragraph-by-paragraph LLM translation from ${escapeHtml(LANG_NAMES[book.sourceLang] || book.sourceLang)}. Saves incrementally to your browser (IndexedDB). Resumable on errors. Once generated, re-reading costs zero. Swap freely between any generated language via the ${['RU','EN','ES','PT'].join(' / ')} pills above.</small></p>`}
            </div>`;
 
       el.innerHTML = `
@@ -1241,7 +1310,7 @@
           <button id="btn-back-book">&#8592;</button>
           <div class="crumbs">${escapeHtml(book.title)} &middot; ${escapeHtml(ch.title)}</div>
           <div class="pills lang-pills">
-            ${['ru','en','es','pt'].map(l => `<button data-lang="${l}" class="pill${l === displayLang ? ' active' : ''}">${l.toUpperCase()}</button>`).join('')}
+            ${['ru','en','es','pt'].map(l => `<button data-lang="${l}" class="pill${l === displayLang ? ' active' : ''}${langHasContent[l] ? ' has-content' : ''}" title="${langHasContent[l] ? 'Has translated text' : (l === book.sourceLang ? 'Source language' : 'Not translated yet — click to generate')}">${l.toUpperCase()}${langHasContent[l] ? '<span class="pill-dot">&bull;</span>' : ''}</button>`).join('')}
           </div>
           <div class="pills level-pills"${displayLang === 'es' ? '' : ' hidden'}>
             ${['A2','B1','B2','C1'].map(lv => `<button data-level="${lv}" class="pill${lv === level ? ' active' : ''}">${lv}</button>`).join('')}
