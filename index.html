@@ -1035,17 +1035,21 @@
       );
     });
 
-    // ============ Spanish generator ============
+    // ============ Translation generator (any target language) ============
     // Resumable + incremental-save: if a partial translation exists, resume from where it stopped.
     // Saves every SAVE_EVERY paragraphs so a mid-run error doesn't lose progress.
-    async function generateSpanish(chapter, book, level, onProgress) {
+    // targetLang: 'es'|'en'|'ru'|'pt'   level: 'A2'|'B1'|'B2'|'C1' (only used for 'es')
+    async function generateTranslation(chapter, book, targetLang, level, onProgress) {
       const SAVE_EVERY = 5;
       const source = chapter.sourceText || chapter.versions?.[book.sourceLang];
       if (!source) throw new Error('no source text');
+      if (targetLang === book.sourceLang) throw new Error('cannot translate to source language');
       const paras = splitParagraphs(source);
 
-      // Resume: if partial exists, count already-translated paragraphs and start there
-      const existing = chapter.versions?.es?.[level];
+      // Resume: read existing partial for THIS target lang (+level for es)
+      const existing = targetLang === 'es'
+        ? chapter.versions?.es?.[level]
+        : chapter.versions?.[targetLang];
       const existingParas = existing ? splitParagraphs(existing) : [];
       const out = [...existingParas];
       const startAt = existingParas.length;
@@ -1054,7 +1058,11 @@
         const updated = await Storage.chapters.get(chapter.id);
         if (!updated) return;
         updated.versions = updated.versions || {};
-        updated.versions.es = { ...(updated.versions.es || {}), [level]: out.join('\n\n') };
+        if (targetLang === 'es') {
+          updated.versions.es = { ...(updated.versions.es || {}), [level]: out.join('\n\n') };
+        } else {
+          updated.versions[targetLang] = out.join('\n\n');
+        }
         await Storage.chapters.put({ ...updated, sourceText: source });
       };
 
@@ -1068,8 +1076,8 @@
               task: 'translate_chunk',
               input: {
                 text: paras[i],
-                targetLang: 'es',
-                level,
+                targetLang,
+                level: targetLang === 'es' ? level : undefined,
                 prevContext: paras[i-1] || undefined,
                 nextContext: paras[i+1] || undefined
               },
@@ -1081,17 +1089,15 @@
           try { j = await r.json(); } catch {}
           if (!r.ok || !j?.result || typeof j.result.text !== 'string') {
             const detail = j?.error || j?.detail || `HTTP ${r.status}`;
-            // Non-fatal: insert placeholder, log, continue. User can re-run to retry skipped ones.
-            console.warn(`[generateSpanish] para ${i} failed: ${detail} — inserting placeholder`);
+            console.warn(`[generateTranslation:${targetLang}] para ${i} failed: ${detail} — placeholder`);
             out.push(`[⚠ para ${i+1} untranslated — click Generate again to retry]\n\n${paras[i]}`);
           } else {
             out.push(j.result.text);
           }
         } catch (netErr) {
-          console.warn(`[generateSpanish] para ${i} network error: ${netErr.message}`);
+          console.warn(`[generateTranslation:${targetLang}] para ${i} network error: ${netErr.message}`);
           out.push(`[⚠ para ${i+1} network error — click Generate again to retry]\n\n${paras[i]}`);
         }
-        // Checkpoint
         if ((i + 1) % SAVE_EVERY === 0) await saveProgress();
       }
       onProgress?.(paras.length, paras.length);
@@ -1115,27 +1121,36 @@
       const displayLang = await Storage.settings.get('displayLang:' + book.id, book.sourceLang);
       const level = await Storage.settings.get('level:' + book.id, 'B1');
 
-      // Pick text body
+      // Pick text body for the currently displayed language
       let body;
       if (displayLang === 'es') body = ch.versions?.es?.[level] || null;
       else body = ch.versions?.[displayLang] || null;
+
+      const isSourceLang = displayLang === book.sourceLang;
+      const langLabelFull = displayLang === 'es' ? `Spanish (${level})` : ({
+        ru: 'Russian', en: 'English', pt: 'Portuguese', es: 'Spanish'
+      }[displayLang] || displayLang.toUpperCase());
 
       let sIdx = 0;
       const paragraphsHtml = body
         ? splitParagraphs(body).map(p =>
             `<p>${splitSentences(p).map(s => renderSentence(s, sIdx++)).join(' ')}</p>`
           ).join('')
-        : `<div class="empty"><p>No text for <b>${escapeHtml(displayLang)}${displayLang === 'es' ? ' ' + escapeHtml(level) : ''}</b> yet.</p>
-               ${displayLang === 'es'
-                 ? `<button id="btn-generate">Generate ES ${escapeHtml(level)}</button><div id="gen-progress"></div>`
-                 : `<p><i>Only Spanish generation is supported. Import an English or Russian version manually if needed.</i></p>`}</div>`;
+        : `<div class="empty">
+             <p>No <b>${escapeHtml(langLabelFull)}</b> text for this chapter yet.</p>
+             ${isSourceLang
+               ? `<p><i>This is the source language — the original text should already be here. Try re-importing the book.</i></p>`
+               : `<button id="btn-generate">Generate ${escapeHtml(langLabelFull)}</button>
+                  <div id="gen-progress"></div>
+                  <p class="hint"><small>Paragraph-by-paragraph LLM translation. Saves every 5 paragraphs to your browser (IndexedDB). If it errors mid-way, click Generate again to resume from where it stopped. Read/re-read costs zero after — the text is cached forever locally.</small></p>`}
+           </div>`;
 
       el.innerHTML = `
         <header class="topbar reader-topbar">
           <button id="btn-back-book">&#8592;</button>
           <div class="crumbs">${escapeHtml(book.title)} &middot; ${escapeHtml(ch.title)}</div>
           <div class="pills lang-pills">
-            ${['ru','en','es'].map(l => `<button data-lang="${l}" class="pill${l === displayLang ? ' active' : ''}">${l.toUpperCase()}</button>`).join('')}
+            ${['ru','en','es','pt'].map(l => `<button data-lang="${l}" class="pill${l === displayLang ? ' active' : ''}">${l.toUpperCase()}</button>`).join('')}
           </div>
           <div class="pills level-pills"${displayLang === 'es' ? '' : ' hidden'}>
             ${['A2','B1','B2','C1'].map(lv => `<button data-level="${lv}" class="pill${lv === level ? ' active' : ''}">${lv}</button>`).join('')}
@@ -1160,11 +1175,12 @@
         nav('reader', { chapterId });
       }));
 
+      // Generate button — works for ANY non-source target language
       document.getElementById('btn-generate')?.addEventListener('click', async (e) => {
         e.target.disabled = true;
         const prog = document.getElementById('gen-progress');
         try {
-          await generateSpanish(ch, book, level, (done, total) => {
+          await generateTranslation(ch, book, displayLang, level, (done, total) => {
             prog.textContent = `Translating paragraph ${done} / ${total}...`;
           });
           nav('reader', { chapterId });

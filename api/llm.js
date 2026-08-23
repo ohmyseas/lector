@@ -37,7 +37,7 @@ Rules:
 - Each chunk's gloss is a literal translation into l1 (parenthetical style).
 - "clean" is the full sentence translated fluently into l1 for meaning-check.`,
 
-  translate_chunk: (glossary, bookMeta) => `You are translating a Buddhist text from ${bookMeta.sourceLang} to Spanish at CEFR ${'{{LEVEL}}'} level. Faithful to meaning, natural Spanish, level-appropriate vocabulary.
+  translate_chunk: (glossary, bookMeta) => `You are translating a Buddhist text from ${bookMeta.sourceLang || '?'} to {{TARGET_LANG_NAME}}{{LEVEL_CLAUSE}}. Faithful to meaning, natural {{TARGET_LANG_NAME}}, level-appropriate vocabulary.
 
 Book: ${bookMeta.title} by ${bookMeta.author}.
 
@@ -48,6 +48,8 @@ Output MUST be a raw JSON object — no markdown fences, no \`\`\`json, no comme
 
 Required shape: {"text": string}.`
 };
+
+const LANG_NAMES = { es: 'Spanish', en: 'English', ru: 'Russian' };
 
 function pickModel(task) {
   return task === 'gloss' ? MODEL_HAIKU : MODEL_SONNET;
@@ -61,9 +63,12 @@ function buildUser(task, input) {
     return `Sentence: ${input.sentence}\ndisplayLang: ${input.displayLang}\nl1: ${input.l1}`;
   }
   if (task === 'translate_chunk') {
+    const target = input.targetLang || 'es';
+    const targetName = { es: 'Spanish', en: 'English', ru: 'Russian' }[target] || 'Spanish';
+    const levelHint = target === 'es' ? ` (${input.level || 'B1'})` : '';
     const prev = input.prevContext ? `Previous paragraph (context, do not translate):\n${input.prevContext}\n\n` : '';
     const next = input.nextContext ? `\n\nNext paragraph (context, do not translate):\n${input.nextContext}` : '';
-    return `${prev}Translate to Spanish (${input.level}):\n${input.text}${next}`;
+    return `${prev}Translate to ${targetName}${levelHint}:\n${input.text}${next}`;
   }
   throw new Error(`unknown task ${task}`);
 }
@@ -117,7 +122,15 @@ export default async function handler(req, res) {
 
     const model = pickModel(task);
     let system = SYS[task](glossary, bookMeta);
-    if (task === 'translate_chunk') system = system.replace('{{LEVEL}}', input.level || 'B1');
+    if (task === 'translate_chunk') {
+      const target = input.targetLang || 'es';
+      const langName = LANG_NAMES[target] || 'Spanish';
+      // Level only applies to Spanish (CEFR-graded reader). Other languages: straight translation.
+      const levelClause = target === 'es' ? ` at CEFR ${input.level || 'B1'} level` : '';
+      system = system
+        .replaceAll('{{TARGET_LANG_NAME}}', langName)
+        .replace('{{LEVEL_CLAUSE}}', levelClause);
+    }
     const user = buildUser(task, input);
     const maxTokens = task === 'gloss' ? 400 : task === 'breakdown' ? 1500 : 4000;
 

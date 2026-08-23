@@ -6,16 +6,17 @@ const MODEL_ID = {
 // Per-language voice slots. Falls back to legacy NARRATOR/KRAVTSOV for compat.
 function pickVoice(name, lang) {
   const env = process.env;
-  if (name === 'es') return env.ELEVENLABS_VOICE_ID_ES_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
-  if (name === 'en') return env.ELEVENLABS_VOICE_ID_EN_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
-  if (name === 'ru') return env.ELEVENLABS_VOICE_ID_RU_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
+  const byLang = {
+    es: env.ELEVENLABS_VOICE_ID_ES_NARRATOR,
+    en: env.ELEVENLABS_VOICE_ID_EN_NARRATOR,
+    ru: env.ELEVENLABS_VOICE_ID_RU_NARRATOR,
+    pt: env.ELEVENLABS_VOICE_ID_PT_NARRATOR
+  };
+  if (byLang[name]) return byLang[name];
   if (name === 'kravtsov') return env.ELEVENLABS_VOICE_ID_KRAVTSOV;
-  if (name === 'narrator' && lang) {
-    if (lang === 'es') return env.ELEVENLABS_VOICE_ID_ES_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
-    if (lang === 'en') return env.ELEVENLABS_VOICE_ID_EN_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
-    if (lang === 'ru') return env.ELEVENLABS_VOICE_ID_RU_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
-  }
-  return env.ELEVENLABS_VOICE_ID_NARRATOR || env.ELEVENLABS_VOICE_ID_ES_NARRATOR;
+  if (name === 'narrator' && byLang[lang]) return byLang[lang];
+  // Fallbacks
+  return env.ELEVENLABS_VOICE_ID_NARRATOR || byLang.es || byLang.en;
 }
 
 // Bucket ElevenLabs character-level alignment into words by whitespace/punctuation boundaries.
