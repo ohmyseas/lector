@@ -110,12 +110,14 @@ const shot = async (page, name) => { await page.screenshot({ path: join(OUT, nam
     }));
     if (state.playerHasAudio && state.playerPaused) pass('Player paused (audioEl held, paused=true)'); else fail('pause', JSON.stringify(state));
 
-    // Step 5: Tap word in paragraph 2, popover 🔊 paragraph
-    console.log('\n[5] Tap word in paragraph 2 → popover 🔊 paragraph');
+    // Step 5: Tap word in paragraph 2, popover ▶ paragraph (RWL jump)
+    console.log('\n[5] Tap word in paragraph 2 → popover ▶ paragraph (RWL jump)');
     const allParas = await page.locator('main.reader p').all();
     console.log(`  paragraphs: ${allParas.length}`);
     if (allParas.length < 2) { fail('paragraph count', `expected 2, got ${allParas.length}`); }
     else {
+      // Get expected jump index (first sentence of paragraph 2)
+      const p2FirstSentIdx = parseInt(await allParas[1].locator('.sent').first().getAttribute('data-sent'), 10);
       // Tap first word of paragraph 2
       await allParas[1].locator('.w').first().click();
       await page.waitForTimeout(2500);   // wait for popover + LLM gloss
@@ -123,35 +125,41 @@ const shot = async (page, name) => { await page.screenshot({ path: join(OUT, nam
       if (!popVis) { fail('popover appears', 'not visible'); }
       else {
         pass('popover appeared on paragraph-2 word tap');
-        // Click popover 🔊 paragraph
-        await page.locator('#pop-play-para').click({ force: true });
-        await page.waitForTimeout(1500);   // let ephemeral audio start
+        // Click popover ▶ paragraph (RWL jump — replaces old ephemeral behavior)
+        await page.locator('#pop-jump-para').click({ force: true });
+        await page.waitForTimeout(1500);
 
-        // KEY ASSERTION: Player.audioEl should be null (stopped by playSentence), ephemeral audio should exist
+        // NEW BEHAVIOR: Player.audioEl SHOULD exist (RWL playing from paragraph 2),
+        // Player.idx SHOULD match paragraph 2's first sentence.
+        // No parallel: the old sentence-0 audio was stopped by Player.start's internal stop().
         state = await page.evaluate(() => ({
           playerHasAudio: !!window.Player?.audioEl,
           playerIdx: window.Player?.idx,
         }));
-        if (!state.playerHasAudio) pass('after popover play-paragraph: Player.audioEl cleared (no parallel)');
-        else fail('parallel bug', `Player.audioEl still exists (${JSON.stringify(state)}) — parallel audio!`);
+        if (state.playerHasAudio && state.playerIdx === p2FirstSentIdx) pass(`▶ paragraph jumped Player to sent ${state.playerIdx} (paragraph 2 first sentence)`);
+        else fail('jump behavior', `expected idx ${p2FirstSentIdx}, got ${JSON.stringify(state)}`);
+        // Confirm highlight moved off sentence 0
+        const stillOn0 = await page.locator('.sent[data-sent="0"].playing').isVisible().catch(() => false);
+        if (!stillOn0) pass('highlight cleared from sentence 0 (no stale highlight)');
+        else fail('stale highlight', 'sent 0 still highlighted');
         await shot(page, 'F2-popover-paragraph.png');
       }
     }
 
-    // Step 6: Press ▶ topbar → Player restarts fresh
-    console.log('\n[6] Press ▶ topbar');
-    // Close popover first
+    // Step 6: Press ⏸ topbar → pause the RWL playback that started from paragraph 2
+    console.log('\n[6] Press ⏸ topbar → pause RWL');
+    // Close popover first (defensive)
     await page.evaluate(() => { const p = document.getElementById('popover'); if (p) p.hidden = true; });
     await page.waitForTimeout(300);
     await page.locator('.play-btn').click();
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(500);
     state = await page.evaluate(() => ({
       playerHasAudio: !!window.Player?.audioEl,
-      playerPlaying: window.Player?.isPlaying(),
+      playerPaused: window.Player?.audioEl?.paused,
       playerIdx: window.Player?.idx,
     }));
-    if (state.playerHasAudio && state.playerPlaying) pass(`▶ restarted RWL (idx=${state.playerIdx})`);
-    else fail('▶ after paragraph-play', JSON.stringify(state));
+    if (state.playerHasAudio && state.playerPaused) pass(`⏸ paused RWL at idx=${state.playerIdx} (no parallel)`);
+    else fail('⏸ after paragraph-jump', JSON.stringify(state));
 
     // Step 7: Stop → both cleared
     console.log('\n[7] Click ⏹ stop');
@@ -170,7 +178,7 @@ const shot = async (page, name) => { await page.screenshot({ path: join(OUT, nam
     console.log('\n[8] Popover play then ⏹');
     await allParas[1].locator('.w').first().click();
     await page.waitForTimeout(2500);
-    await page.locator('#pop-play-para').click({ force: true });
+    await page.locator('#pop-jump-para').click({ force: true });
     await page.waitForTimeout(1000);
     // Now click stop
     await page.locator('.stop-btn').click();
