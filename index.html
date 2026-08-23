@@ -314,7 +314,7 @@
     }
 
     /* ===== Word popover ===== */
-    #popover { position: absolute; z-index: 100; background: var(--bg); border: 1px solid #ddd; border-radius: 8px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.12); max-width: 320px; font-family: var(--sans); font-size: 14px; }
+    #popover { position: fixed; z-index: 100; background: var(--bg); border: 1px solid #ddd; border-radius: 8px; padding: 12px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.12); max-width: 320px; font-family: var(--sans); font-size: 14px; max-height: 80vh; overflow-y: auto; }
     .pop-word { font-size: 16px; margin-bottom: 4px; }
     .pop-lemma { color: #888; font-size: 13px; font-style: italic; }
     .pop-gloss { margin: 8px 0; }
@@ -1426,8 +1426,19 @@
           pop.hidden = false;
           pop.innerHTML = `<div class="pop-loading">Looking up &#8220;${escapeHtml(word)}&#8221;&#8230;</div>`;
           const rect = w.getBoundingClientRect();
-          pop.style.left = Math.max(8, Math.min(window.innerWidth - 320, rect.left)) + 'px';
-          pop.style.top = (window.scrollY + rect.bottom + 6) + 'px';
+          // Position popover viewport-relative (position: fixed).
+          // Prefer below the word, but flip above if not enough room, then clamp to viewport.
+          const POP_MAX_H = Math.min(window.innerHeight * 0.8, 400);
+          const POP_W = 320;
+          const spaceBelow = window.innerHeight - rect.bottom;
+          const spaceAbove = rect.top;
+          const preferAbove = spaceBelow < POP_MAX_H && spaceAbove > spaceBelow;
+          pop.style.left = Math.max(8, Math.min(window.innerWidth - POP_W - 8, rect.left)) + 'px';
+          if (preferAbove) {
+            pop.style.top = Math.max(8, rect.top - POP_MAX_H - 6) + 'px';
+          } else {
+            pop.style.top = Math.min(rect.bottom + 6, window.innerHeight - POP_MAX_H - 8) + 'px';
+          }
 
           try {
             const r = await fetch('/api/llm', {
