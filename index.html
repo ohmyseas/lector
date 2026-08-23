@@ -1071,6 +1071,21 @@
         playBtn.textContent = '⏸';
       });
 
+      // ---- Shift+click speaks sentence (ephemeral Flash) ----
+      el.querySelector('main.reader').addEventListener('click', async (e) => {
+        if (!e.shiftKey) return;
+        const sent = e.target.closest('.sent');
+        if (!sent) return;
+        const r = await fetch('/api/tts', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text: sent.textContent.trim(), model: 'flash_v2_5', voice: book.narratorVoice || 'narrator', withTimestamps: false })
+        });
+        if (!r.ok) return alert('TTS error');
+        const blob = await r.blob();
+        new Audio(URL.createObjectURL(blob)).play();
+      });
+
       // ---- Route teardown: stop player when navigating away ----
       readerAbort.signal.addEventListener('abort', () => Player.stop());
 
@@ -1079,6 +1094,7 @@
       if (pop) {
         el.querySelector('main.reader').addEventListener('click', async (e) => {
           if (e.altKey) return;
+          if (e.shiftKey) return;
           const w = e.target.closest('.w');
           if (!w) { pop.hidden = true; return; }
           const sent = w.closest('.sent');
@@ -1111,7 +1127,8 @@
               <div class="pop-note">${escapeHtml(g.note || '')}</div>
               <div class="pop-actions">
                 <button id="pop-save">+ save</button>
-                <button id="pop-close">&#10005;</button>
+                <button id="pop-speak">🔊</button>
+                <button id="pop-close">✕</button>
               </div>`;
             document.getElementById('pop-save').addEventListener('click', async () => {
               await Storage.vocab.put({
@@ -1122,6 +1139,16 @@
                 const btn = document.getElementById('pop-save');
                 if (btn) btn.textContent = '✓ saved';
               }
+            });
+            document.getElementById('pop-speak').addEventListener('click', async () => {
+              const r = await fetch('/api/tts', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ text: sentence, model: 'flash_v2_5', voice: book.narratorVoice || 'narrator', withTimestamps: false })
+              });
+              if (!r.ok) return alert('TTS error');
+              const blob = await r.blob();
+              new Audio(URL.createObjectURL(blob)).play();
             });
             document.getElementById('pop-close').addEventListener('click', () => { pop.hidden = true; });
           } catch (err) {
