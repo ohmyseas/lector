@@ -1189,6 +1189,7 @@
           if (e.altKey) return;
           if (e.shiftKey) return;
           if (e.ctrlKey) return;
+          if (e.detail > 1) return;   // suppress double-click's first click
           const w = e.target.closest('.w');
           if (!w) { pop.hidden = true; return; }
           const sent = w.closest('.sent');
@@ -1281,7 +1282,7 @@
             })
           });
           const j = await r.json();
-          if (!r.ok) throw new Error(j.error);
+          if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status);
           const b = j.result;
           holder.innerHTML = `
             <div class="bd-chunks">${b.chunks.map(c => `<span class="bd-ch"><span class="bd-t">${escapeHtml(c.text)}</span> <span class="bd-g">(${escapeHtml(c.gloss)})</span></span>`).join(' ')}</div>
@@ -1290,6 +1291,8 @@
           holder.querySelector('.bd-close').addEventListener('click', () => { holder.remove(); delete sent.dataset.hasBreakdown; });
         } catch (err) {
           holder.textContent = 'Error: ' + err.message;
+          delete sent.dataset.hasBreakdown;
+          setTimeout(() => holder.remove(), 3000);
         }
       });
     });
@@ -1335,7 +1338,7 @@
         const tsv = shown.map(v => {
           const book = books.find(b => b.id === v.bookId);
           const ch = v.chapterId;
-          return [v.word, v.gloss, v.sourceSentence.replace(/\t/g, ' '), book?.title || '', ch || ''].join('\t');
+          return [v.word, v.gloss, v.sourceSentence.replace(/[\t\r\n]/g, ' '), book?.title || '', ch || ''].join('\t');
         }).join('\n');
         try {
           await navigator.clipboard.writeText(tsv);
