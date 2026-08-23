@@ -1,13 +1,17 @@
 export default function handler(req, res) {
+  const env = process.env;
   res.status(200).json({
     ok: true,
     service: 'lector',
     ts: Date.now(),
     voices: {
-      narrator: !!process.env.ELEVENLABS_VOICE_ID_NARRATOR,
-      kravtsov: !!process.env.ELEVENLABS_VOICE_ID_KRAVTSOV
+      narrator: !!env.ELEVENLABS_VOICE_ID_NARRATOR,
+      kravtsov: !!env.ELEVENLABS_VOICE_ID_KRAVTSOV,
+      es: !!env.ELEVENLABS_VOICE_ID_ES_NARRATOR,
+      en: !!env.ELEVENLABS_VOICE_ID_EN_NARRATOR,
+      ru: !!env.ELEVENLABS_VOICE_ID_RU_NARRATOR
     },
-    llmConfigured: !!process.env.ANTHROPIC_API_KEY,
-    ttsConfigured: !!process.env.ELEVENLABS_API_KEY
+    llmConfigured: !!env.ANTHROPIC_API_KEY,
+    ttsConfigured: !!env.ELEVENLABS_API_KEY
   });
 }

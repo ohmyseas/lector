@@ -3,9 +3,19 @@ const MODEL_ID = {
   flash_v2_5: 'eleven_flash_v2_5'
 };
 
-function pickVoice(name) {
-  if (name === 'kravtsov') return process.env.ELEVENLABS_VOICE_ID_KRAVTSOV;
-  return process.env.ELEVENLABS_VOICE_ID_NARRATOR;
+// Per-language voice slots. Falls back to legacy NARRATOR/KRAVTSOV for compat.
+function pickVoice(name, lang) {
+  const env = process.env;
+  if (name === 'es') return env.ELEVENLABS_VOICE_ID_ES_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
+  if (name === 'en') return env.ELEVENLABS_VOICE_ID_EN_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
+  if (name === 'ru') return env.ELEVENLABS_VOICE_ID_RU_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
+  if (name === 'kravtsov') return env.ELEVENLABS_VOICE_ID_KRAVTSOV;
+  if (name === 'narrator' && lang) {
+    if (lang === 'es') return env.ELEVENLABS_VOICE_ID_ES_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
+    if (lang === 'en') return env.ELEVENLABS_VOICE_ID_EN_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
+    if (lang === 'ru') return env.ELEVENLABS_VOICE_ID_RU_NARRATOR || env.ELEVENLABS_VOICE_ID_NARRATOR;
+  }
+  return env.ELEVENLABS_VOICE_ID_NARRATOR || env.ELEVENLABS_VOICE_ID_ES_NARRATOR;
 }
 
 // Bucket ElevenLabs character-level alignment into words by whitespace/punctuation boundaries.
@@ -33,13 +43,20 @@ function bucketWords(chars, starts, ends) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   try {
-    const { text, model = 'multilingual_v2', voice = 'narrator', withTimestamps = false, previousRequestIds } = req.body || {};
+    const {
+      text,
+      model = 'multilingual_v2',
+      voice = 'narrator',
+      lang,
+      withTimestamps = false,
+      previousRequestIds
+    } = req.body || {};
     if (!text) return res.status(400).json({ error: 'text required' });
 
     const modelId = MODEL_ID[model];
     if (!modelId) return res.status(400).json({ error: `unknown model ${model}` });
-    const voiceId = pickVoice(voice);
-    if (!voiceId) return res.status(500).json({ error: `voice ${voice} not configured in env` });
+    const voiceId = pickVoice(voice, lang);
+    if (!voiceId) return res.status(500).json({ error: `voice slot not configured (voice=${voice}, lang=${lang})` });
 
     const endpoint = withTimestamps
       ? `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`
@@ -64,7 +81,11 @@ export default async function handler(req, res) {
 
     if (!r.ok) {
       const errText = await r.text();
-      return res.status(r.status).json({ error: `elevenlabs ${r.status}`, detail: errText.slice(0, 500) });
+      return res.status(r.status).json({
+        error: `elevenlabs ${r.status}`,
+        detail: errText.slice(0, 500),
+        voiceId
+      });
     }
     const requestId = r.headers.get('request-id') || r.headers.get('x-request-id') || '';
 
@@ -82,6 +103,6 @@ export default async function handler(req, res) {
       return res.status(200).send(buf);
     }
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: 'tts proxy error', detail: (e.message || '').slice(0, 200) });
   }
 }

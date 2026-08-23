@@ -621,6 +621,34 @@
     });
 
     // ============ splitIntoChapters ============
+    const MAX_CHAPTER_CHARS = 25000;  // subdivide larger chunks so single-chapter LLM cost stays bounded
+
+    function subdivideOversized(chapters) {
+      const out = [];
+      for (const c of chapters) {
+        if (!c.sourceText || c.sourceText.length <= MAX_CHAPTER_CHARS) { out.push(c); continue; }
+        // Split by paragraph boundary, accumulate up to MAX_CHAPTER_CHARS
+        const paras = c.sourceText.split(/\n{2,}/);
+        let buf = [], bufLen = 0, partNum = 0;
+        const flush = () => {
+          if (!buf.length) return;
+          partNum++;
+          out.push({
+            title: `${c.title} (Part ${partNum})`,
+            sourceText: buf.join('\n\n'),
+            ...(c.frontMatter ? { frontMatter: true } : {})
+          });
+          buf = []; bufLen = 0;
+        };
+        for (const p of paras) {
+          if (bufLen + p.length > MAX_CHAPTER_CHARS && buf.length) flush();
+          buf.push(p); bufLen += p.length + 2;
+        }
+        flush();
+      }
+      return out;
+    }
+
     function splitIntoChapters(text) {
       const lines = text.split(/\r?\n/);
       // Try heuristics in order; first that yields >=2 chapters wins.
@@ -630,25 +658,26 @@
         { name: 'chapter-word', re: /^\s*(Глава|ГЛАВА|Часть|ЧАСТЬ|Chapter|CHAPTER|Capítulo|CAPÍTULO)\s+([IVXLCDM\d]+)(?:\s*[.:—-]?\s*(.*))?$/ }
       ];
 
+      let chapters = null;
       for (const h of heuristics) {
         const cuts = [];
         lines.forEach((line, i) => { const m = h.re.exec(line); if (m) cuts.push({ i, title: m[0].replace(/^#+\s*/, '').trim() }); });
         if (cuts.length >= 2) {
-          const chapters = [];
+          chapters = [];
           for (let k = 0; k < cuts.length; k++) {
             const start = cuts[k].i;
             const end = cuts[k+1] ? cuts[k+1].i : lines.length;
             const body = lines.slice(start + 1, end).join('\n').trim();
             chapters.push({ title: cuts[k].title, sourceText: body });
           }
-          // Prepend front-matter as its own chapter if content exists before first cut
           const prelude = lines.slice(0, cuts[0].i).join('\n').trim();
           if (prelude.length > 500) chapters.unshift({ title: '(Front matter)', sourceText: prelude, frontMatter: true });
-          return chapters;
+          break;
         }
       }
-      // Fallback: no chapters detected, whole thing is one chapter
-      return [{ title: 'Chapter 1', sourceText: text.trim() }];
+      if (!chapters) chapters = [{ title: 'Chapter 1', sourceText: text.trim() }];
+      // Auto-subdivide any chapter body that exceeds the cost/latency budget
+      return subdivideOversized(chapters);
     }
     window.splitIntoChapters = splitIntoChapters;
 
@@ -683,38 +712,56 @@
       return new Blob([bytes], { type });
     }
 
-    async function voiceChapter(chapter, book, voice, onProgress) {
-      const bodyText = (chapter.versions?.es?.B1) || chapter.versions?.[book.sourceLang] || chapter.sourceText;
-      if (!bodyText) throw new Error('no text to voice');
+    // Voice a chapter in a specific language + level.
+    // targetLang: 'es' | 'ru' | 'en'   |   level: 'A2'|'B1'|'B2'|'C1' (only used when targetLang='es')
+    // Cache key format: `${lang}` for RU/EN, `${lang}_${level}` for ES.
+    // Server picks appropriate voice via lang hint.
+    function voiceKey(targetLang, level) {
+      return targetLang === 'es' ? `es_${level || 'B1'}` : targetLang;
+    }
+
+    function bodyForLang(chapter, targetLang, level) {
+      if (targetLang === 'es') return chapter.versions?.es?.[level || 'B1'];
+      return chapter.versions?.[targetLang];
+    }
+
+    async function voiceChapter(chapter, book, targetLang, level, onProgress) {
+      const bodyText = bodyForLang(chapter, targetLang, level);
+      if (!bodyText) throw new Error(`no ${targetLang}${targetLang==='es' ? ' '+level : ''} text — generate/import it first`);
       const sentences = splitParagraphs(bodyText).flatMap(splitSentences);
-      const voiceId = voice; // label 'narrator' or 'kravtsov'; hash-cached under label
+      const key = voiceKey(targetLang, level);
       let prevReqIds = [];
       for (let i = 0; i < sentences.length; i++) {
         const s = sentences[i];
-        const hash = await sentenceHash(s + '|' + voiceId);
-        const existing = await Storage.audio.get(chapter.id, hash, voiceId);
-        if (existing) {
-          onProgress?.(i + 1, sentences.length);
-          continue;
-        }
+        const hash = await sentenceHash(s + '|' + key);
+        const existing = await Storage.audio.get(chapter.id, hash, key);
+        if (existing) { onProgress?.(i + 1, sentences.length); continue; }
         const r = await fetch('/api/tts', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            text: s, model: 'multilingual_v2', voice, withTimestamps: true,
+            text: s,
+            model: 'multilingual_v2',
+            voice: 'narrator',
+            lang: targetLang,
+            withTimestamps: true,
             previousRequestIds: prevReqIds.slice(-3)
           })
         });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error || 'tts failed at sentence ' + i);
+        let j = null;
+        try { j = await r.json(); } catch {}
+        if (!r.ok || !j?.audioBase64) {
+          const detail = j?.error || j?.detail || `HTTP ${r.status}`;
+          throw new Error(`tts failed at sentence ${i}: ${detail}`);
+        }
         const blob = base64ToBlob(j.audioBase64);
-        await Storage.audio.put(chapter.id, hash, voiceId, { blob, timings: j.timings });
+        await Storage.audio.put(chapter.id, hash, key, { blob, timings: j.timings });
         if (j.requestId) prevReqIds.push(j.requestId);
         onProgress?.(i + 1, sentences.length);
       }
       onProgress?.(sentences.length, sentences.length);
       const updated = await Storage.chapters.get(chapter.id);
-      updated.voiced = { ...(updated.voiced || {}), [voiceId]: true };
+      updated.voiced = { ...(updated.voiced || {}), [key]: true };
       await Storage.chapters.put(updated);
     }
 
@@ -762,18 +809,19 @@
     }
 
     // ============ RWL Playback Engine ============
+    // Language-aware: reads audio from cache keyed by voiceKey(targetLang, level).
     const Player = {
-      audioEl: null, chapter: null, book: null, sentences: [], voiceId: null, idx: 0, timings: [], speed: 1, saveTimer: null,
-      async start(chapter, book, fromIdx = 0) {
+      audioEl: null, chapter: null, book: null, sentences: [], key: null, idx: 0, timings: [], speed: 1, saveTimer: null,
+      async start(chapter, book, targetLang, level, fromIdx = 0) {
         this.stop();
-        const voiceId = book.narratorVoice || 'narrator';
-        // Self-guard: refuse to start if chapter has no voiced audio for this voice
-        if (!chapter.voiced?.[voiceId]) {
-          console.warn('[Player] chapter not voiced for', voiceId);
+        const key = voiceKey(targetLang, level);
+        if (!chapter.voiced?.[key]) {
+          console.warn('[Player] chapter not voiced for', key);
           return;
         }
-        this.chapter = chapter; this.book = book; this.voiceId = voiceId;
-        const body = chapter.versions?.es?.B1 || chapter.versions?.[book.sourceLang] || chapter.sourceText;
+        const body = bodyForLang(chapter, targetLang, level);
+        if (!body) { console.warn('[Player] no body text for', targetLang, level); return; }
+        this.chapter = chapter; this.book = book; this.key = key;
         this.sentences = splitParagraphs(body).flatMap(splitSentences);
         this.idx = fromIdx;
         this.audioEl = new Audio();
@@ -786,9 +834,9 @@
       async _play() {
         if (this.idx >= this.sentences.length) return this.stop();
         const s = this.sentences[this.idx];
-        const hash = await sentenceHash(s + '|' + this.voiceId);
-        const rec = await Storage.audio.get(this.chapter.id, hash, this.voiceId);
-        if (!rec) { console.warn('[Player] missing audio for sentence', this.idx); return this._next(); }
+        const hash = await sentenceHash(s + '|' + this.key);
+        const rec = await Storage.audio.get(this.chapter.id, hash, this.key);
+        if (!rec) { console.warn('[Player] missing audio for sentence', this.idx, 'key', this.key); return this._next(); }
         this.timings = rec.timings || [];
         if (this.audioEl.src) URL.revokeObjectURL(this.audioEl.src);
         this.audioEl.src = URL.createObjectURL(rec.blob);
@@ -814,7 +862,7 @@
         if (!this.chapter) return;
         const ch = await Storage.chapters.get(this.chapter.id);
         if (!ch) return;
-        ch.playbackResume = { sentenceIndex: this.idx, audioTimeSec: this.audioEl?.currentTime || 0, voiceId: this.voiceId };
+        ch.playbackResume = { sentenceIndex: this.idx, audioTimeSec: this.audioEl?.currentTime || 0, key: this.key };
         ch.positionFraction = this.sentences.length ? this.idx / this.sentences.length : 0;
         await Storage.chapters.put({ ...ch, sourceText: ch.sourceText });
       },
@@ -824,7 +872,7 @@
         if (this.saveTimer) { clearInterval(this.saveTimer); this.saveTimer = null; }
         if (this.audioEl) { this.audioEl.pause(); if (this.audioEl.src) { URL.revokeObjectURL(this.audioEl.src); } this.audioEl = null; }
         document.querySelectorAll('.sent.playing, .wnow').forEach(x => x.classList.remove('playing', 'wnow'));
-        this.chapter = null; this.book = null; this.sentences = []; this.timings = []; this.idx = 0;
+        this.chapter = null; this.book = null; this.sentences = []; this.timings = []; this.idx = 0; this.key = null;
       }
     };
 
@@ -987,50 +1035,67 @@
     });
 
     // ============ Spanish generator ============
+    // Resumable + incremental-save: if a partial translation exists, resume from where it stopped.
+    // Saves every SAVE_EVERY paragraphs so a mid-run error doesn't lose progress.
     async function generateSpanish(chapter, book, level, onProgress) {
+      const SAVE_EVERY = 5;
       const source = chapter.sourceText || chapter.versions?.[book.sourceLang];
       if (!source) throw new Error('no source text');
       const paras = splitParagraphs(source);
-      const out = [];
-      for (let i = 0; i < paras.length; i++) {
+
+      // Resume: if partial exists, count already-translated paragraphs and start there
+      const existing = chapter.versions?.es?.[level];
+      const existingParas = existing ? splitParagraphs(existing) : [];
+      const out = [...existingParas];
+      const startAt = existingParas.length;
+
+      const saveProgress = async () => {
+        const updated = await Storage.chapters.get(chapter.id);
+        if (!updated) return;
+        updated.versions = updated.versions || {};
+        updated.versions.es = { ...(updated.versions.es || {}), [level]: out.join('\n\n') };
+        await Storage.chapters.put({ ...updated, sourceText: source });
+      };
+
+      for (let i = startAt; i < paras.length; i++) {
         onProgress?.(i, paras.length);
-        const r = await fetch('/api/llm', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            task: 'translate_chunk',
-            input: {
-              text: paras[i],
-              targetLang: 'es',
-              level,
-              prevContext: paras[i-1] || undefined,
-              nextContext: paras[i+1] || undefined
-            },
-            glossary: book.glossary || [],
-            bookMeta: { title: book.title, author: book.author, sourceLang: book.sourceLang }
-          })
-        });
-        if (!r.ok) {
-          let msg;
-          try { const j = await r.json(); msg = j.error || `HTTP ${r.status}`; }
-          catch { msg = `HTTP ${r.status} (non-JSON body)`; }
-          throw new Error(`translate failed at para ${i}: ${msg}`);
+        try {
+          const r = await fetch('/api/llm', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              task: 'translate_chunk',
+              input: {
+                text: paras[i],
+                targetLang: 'es',
+                level,
+                prevContext: paras[i-1] || undefined,
+                nextContext: paras[i+1] || undefined
+              },
+              glossary: book.glossary || [],
+              bookMeta: { title: book.title, author: book.author, sourceLang: book.sourceLang }
+            })
+          });
+          let j = null;
+          try { j = await r.json(); } catch {}
+          if (!r.ok || !j?.result || typeof j.result.text !== 'string') {
+            const detail = j?.error || j?.detail || `HTTP ${r.status}`;
+            // Non-fatal: insert placeholder, log, continue. User can re-run to retry skipped ones.
+            console.warn(`[generateSpanish] para ${i} failed: ${detail} — inserting placeholder`);
+            out.push(`[⚠ para ${i+1} untranslated — click Generate again to retry]\n\n${paras[i]}`);
+          } else {
+            out.push(j.result.text);
+          }
+        } catch (netErr) {
+          console.warn(`[generateSpanish] para ${i} network error: ${netErr.message}`);
+          out.push(`[⚠ para ${i+1} network error — click Generate again to retry]\n\n${paras[i]}`);
         }
-        let j;
-        try { j = await r.json(); }
-        catch { throw new Error(`translate failed at para ${i}: response not JSON`); }
-        if (!j.result || typeof j.result.text !== 'string') {
-          throw new Error(`translate failed at para ${i}: unexpected response shape`);
-        }
-        out.push(j.result.text);
+        // Checkpoint
+        if ((i + 1) % SAVE_EVERY === 0) await saveProgress();
       }
       onProgress?.(paras.length, paras.length);
-      // Persist
-      const updated = await Storage.chapters.get(chapter.id);
-      updated.versions = updated.versions || {};
-      updated.versions.es = { ...(updated.versions.es || {}), [level]: out.join('\n\n') };
-      await Storage.chapters.put({ ...updated, sourceText: source });
-      return updated.versions.es[level];
+      await saveProgress();
+      return out.join('\n\n');
     }
 
     // ============ Reader screen ============
@@ -1108,17 +1173,20 @@
         }
       });
 
-      // ---- Voice this chapter button ----
-      if (body && !ch.voiced?.[book.narratorVoice || 'narrator']) {
+      // ---- Voice this chapter button (per-language) ----
+      // Voice-key depends on displayLang: es_${level} or ru/en
+      const currentKey = voiceKey(displayLang, level);
+      const langLabel = displayLang === 'es' ? `ES ${level}` : displayLang.toUpperCase();
+      if (body && !ch.voiced?.[currentKey]) {
         const voiceBtn = document.createElement('button');
-        voiceBtn.textContent = '🎙 Voice this chapter';
+        voiceBtn.textContent = `🎙 Voice this chapter (${langLabel})`;
         voiceBtn.className = 'voice-btn';
         el.querySelector('.reader-topbar').appendChild(voiceBtn);
         voiceBtn.addEventListener('click', async () => {
           voiceBtn.disabled = true;
           voiceBtn.textContent = 'Voicing…';
           try {
-            await voiceChapter(ch, book, book.narratorVoice || 'narrator', (d, t) => {
+            await voiceChapter(ch, book, displayLang, level, (d, t) => {
               voiceBtn.textContent = `Voicing ${Math.round(100 * d / t)}% (${d}/${t})`;
             });
             nav('reader', { chapterId });
@@ -1129,18 +1197,17 @@
         });
       }
 
-      // ---- RWL: Play button + speed selector ----
+      // ---- RWL: Play button + speed selector (per-language) ----
       const playBtn = el.querySelector('.play-btn');
-      const isVoiced = !!ch.voiced?.[book.narratorVoice || 'narrator'];
+      const isVoiced = !!ch.voiced?.[currentKey];
       playBtn.disabled = !isVoiced;
-      playBtn.title = isVoiced ? 'Play from position' : 'Voice this chapter first';
+      playBtn.title = isVoiced ? `Play ${langLabel} from position` : `Voice this chapter in ${langLabel} first`;
       playBtn.addEventListener('click', () => {
         if (Player.audioEl && !Player.audioEl.paused) { Player.pause(); playBtn.textContent = '▶'; return; }
         if (Player.audioEl) { Player.resume(); playBtn.textContent = '⏸'; return; }
-        const startIdx = ch.playbackResume?.sentenceIndex || 0;
-        Player.start(ch, book, startIdx);
-        // Player.start returns after kicking _play() (unawaited fire-and-forget).
-        // If start's self-guard fires, audioEl stays null; sync button state on next tick.
+        const resume = ch.playbackResume;
+        const startIdx = (resume && resume.key === currentKey) ? resume.sentenceIndex : 0;
+        Player.start(ch, book, displayLang, level, startIdx);
         setTimeout(() => { playBtn.textContent = Player.audioEl && !Player.audioEl.paused ? '⏸' : '▶'; }, 100);
       });
       el.querySelector('.speed').value = Player.speed;
@@ -1152,11 +1219,11 @@
         const sent = e.target.closest('.sent');
         if (!sent) return;
         const idx = parseInt(sent.dataset.sent);
-        Player.start(ch, book, idx);
+        Player.start(ch, book, displayLang, level, idx);
         playBtn.textContent = '⏸';
       });
 
-      // ---- Shift+click speaks sentence (ephemeral Flash) ----
+      // ---- Shift+click speaks sentence (ephemeral Flash, in displayLang's voice) ----
       el.querySelector('main.reader').addEventListener('click', async (e) => {
         if (!e.shiftKey) return;
         const sent = e.target.closest('.sent');
@@ -1164,7 +1231,13 @@
         const r = await fetch('/api/tts', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text: sent.textContent.trim(), model: 'flash_v2_5', voice: book.narratorVoice || 'narrator', withTimestamps: false })
+          body: JSON.stringify({
+            text: sent.textContent.trim(),
+            model: 'flash_v2_5',
+            voice: 'narrator',
+            lang: displayLang,
+            withTimestamps: false
+          })
         });
         if (!r.ok) return alert('TTS error');
         const blob = await r.blob();

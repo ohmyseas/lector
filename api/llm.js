@@ -68,32 +68,81 @@ function buildUser(task, input) {
   throw new Error(`unknown task ${task}`);
 }
 
+// Robust JSON extraction: try progressively looser approaches.
+// Handles clean JSON, fenced JSON, and JSON embedded in prose.
+function extractJson(raw) {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  // 1. Direct parse
+  try { return JSON.parse(trimmed); } catch {}
+  // 2. Strip markdown fences
+  const nofence = trimmed.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+  try { return JSON.parse(nofence); } catch {}
+  // 3. Extract substring between first { and last matching }
+  const first = raw.indexOf('{');
+  const last = raw.lastIndexOf('}');
+  if (first >= 0 && last > first) {
+    try { return JSON.parse(raw.slice(first, last + 1)); } catch {}
+  }
+  // 4. Try slicing to last balanced brace (handles trailing garbage)
+  if (first >= 0) {
+    let depth = 0, endAt = -1;
+    for (let i = first; i < raw.length; i++) {
+      const c = raw[i];
+      if (c === '{') depth++;
+      else if (c === '}') { depth--; if (depth === 0) { endAt = i; break; } }
+    }
+    if (endAt > first) {
+      try { return JSON.parse(raw.slice(first, endAt + 1)); } catch {}
+    }
+  }
+  return null;
+}
+
+async function callModel(model, system, user, maxTokens) {
+  const resp = await client.messages.create({
+    model, max_tokens: maxTokens, system,
+    messages: [{ role: 'user', content: user }]
+  });
+  const raw = resp.content[0]?.text ?? '';
+  return { raw, usage: resp.usage };
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   try {
     const { task, input, glossary = [], bookMeta = {} } = req.body || {};
     if (!task || !input) return res.status(400).json({ error: 'task and input required' });
+    if (!SYS[task]) return res.status(400).json({ error: `unknown task ${task}` });
 
     const model = pickModel(task);
     let system = SYS[task](glossary, bookMeta);
     if (task === 'translate_chunk') system = system.replace('{{LEVEL}}', input.level || 'B1');
+    const user = buildUser(task, input);
+    const maxTokens = task === 'gloss' ? 400 : task === 'breakdown' ? 1500 : 4000;
 
-    const resp = await client.messages.create({
-      model,
-      max_tokens: task === 'gloss' ? 400 : task === 'breakdown' ? 1500 : 4000,
-      system,
-      messages: [{ role: 'user', content: buildUser(task, input) }]
-    });
+    // First attempt
+    let { raw, usage } = await callModel(model, system, user, maxTokens);
+    let result = extractJson(raw);
 
-    const raw = resp.content[0]?.text ?? '';
-    // Strip markdown fences if model wrapped response despite instructions
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-    let result;
-    try { result = JSON.parse(cleaned); }
-    catch { return res.status(502).json({ error: 'model returned non-JSON', raw }); }
+    // Retry ONCE with a stronger reminder if parse fails
+    if (result === null) {
+      const strongerUser = `${user}\n\nREMINDER: Respond with JSON ONLY. Start with {, end with }, nothing else.`;
+      const second = await callModel(model, system, strongerUser, maxTokens);
+      raw = second.raw;
+      usage = second.usage;
+      result = extractJson(raw);
+    }
 
-    res.status(200).json({ result, model, usage: resp.usage });
+    if (result === null) {
+      return res.status(502).json({
+        error: 'model returned non-JSON after retry',
+        raw_preview: raw.slice(0, 200)
+      });
+    }
+
+    res.status(200).json({ result, model, usage });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: 'llm proxy error', detail: (e.message || '').slice(0, 200) });
   }
 }
