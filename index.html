@@ -695,7 +695,7 @@
         this.audioEl.playbackRate = this.speed;
         this.audioEl.addEventListener('ended', () => this._next());
         this.audioEl.addEventListener('timeupdate', () => this._highlightWord());
-        this._play();
+        this._play().catch(err => { console.error('[Player]', err); this.stop(); });
         this.saveTimer = setInterval(() => this._savePos(), 5000);
       },
       async _play() {
@@ -712,7 +712,7 @@
         if (sentEl) { sentEl.classList.add('playing'); sentEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
         await this.audioEl.play();
       },
-      _next() { this.idx++; this._savePos(); this._play(); },
+      _next() { this.idx++; this._savePos(); this._play().catch(err => { console.error('[Player]', err); this.stop(); }); },
       _highlightWord() {
         const t = this.audioEl.currentTime;
         const w = this.timings.find(x => t >= x.startSec && t <= x.endSec);
@@ -969,6 +969,16 @@
       if (displayLang === 'es') body = ch.versions?.es?.[level] || null;
       else body = ch.versions?.[displayLang] || null;
 
+      let sIdx = 0;
+      const paragraphsHtml = body
+        ? splitParagraphs(body).map(p =>
+            `<p>${splitSentences(p).map(s => renderSentence(s, sIdx++)).join(' ')}</p>`
+          ).join('')
+        : `<div class="empty"><p>No text for <b>${escapeHtml(displayLang)}${displayLang === 'es' ? ' ' + escapeHtml(level) : ''}</b> yet.</p>
+               ${displayLang === 'es'
+                 ? `<button id="btn-generate">Generate ES ${escapeHtml(level)}</button><div id="gen-progress"></div>`
+                 : `<p><i>Only Spanish generation is supported. Import an English or Russian version manually if needed.</i></p>`}</div>`;
+
       el.innerHTML = `
         <header class="topbar reader-topbar">
           <button id="btn-back-book">&#8592;</button>
@@ -987,17 +997,7 @@
             <option value="1.5">1.5&times;</option>
           </select>
         </header>
-        <main class="reader">
-          ${body
-            ? splitParagraphs(body).map(p =>
-                `<p>${splitSentences(p).map(renderSentence).join(' ')}</p>`
-              ).join('')
-            : `<div class="empty"><p>No text for <b>${escapeHtml(displayLang)}${displayLang === 'es' ? ' ' + escapeHtml(level) : ''}</b> yet.</p>
-               ${displayLang === 'es'
-                 ? `<button id="btn-generate">Generate ES ${escapeHtml(level)}</button><div id="gen-progress"></div>`
-                 : `<p><i>Only Spanish generation is supported. Import an English or Russian version manually if needed.</i></p>`}</div>`}
-          <div id="popover" hidden></div>
-        </main>`;
+        <main class="reader">${paragraphsHtml}<div id="popover" hidden></div></main>`;
 
       el.querySelector('#btn-back-book').addEventListener('click', () => nav('book', { id: book.id }));
       el.querySelectorAll('.lang-pills .pill').forEach(p => p.addEventListener('click', async () => {
@@ -1054,8 +1054,11 @@
         if (Player.audioEl) { Player.resume(); playBtn.textContent = '⏸'; return; }
         const startIdx = ch.playbackResume?.sentenceIndex || 0;
         Player.start(ch, book, startIdx);
-        playBtn.textContent = '⏸';
+        // Player.start returns after kicking _play() (unawaited fire-and-forget).
+        // If start's self-guard fires, audioEl stays null; sync button state on next tick.
+        setTimeout(() => { playBtn.textContent = Player.audioEl && !Player.audioEl.paused ? '⏸' : '▶'; }, 100);
       });
+      el.querySelector('.speed').value = Player.speed;
       el.querySelector('.speed').addEventListener('change', (e) => Player.setSpeed(parseFloat(e.target.value)));
 
       // ---- RWL: Alt+click plays from that sentence ----
@@ -1075,6 +1078,7 @@
       const pop = document.getElementById('popover');
       if (pop) {
         el.querySelector('main.reader').addEventListener('click', async (e) => {
+          if (e.altKey) return;
           const w = e.target.closest('.w');
           if (!w) { pop.hidden = true; return; }
           const sent = w.closest('.sent');
