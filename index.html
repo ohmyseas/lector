@@ -520,8 +520,10 @@
 
     // ============ Router (dead simple) ============
     const routes = {};
+    let _currentRouteAbort = null;
     function route(name, renderFn) { routes[name] = renderFn; }
     function nav(name, params = {}) {
+      if (_currentRouteAbort) { _currentRouteAbort.abort(); _currentRouteAbort = null; }
       window.scrollTo(0,0);
       const el = document.getElementById('app');
       el.innerHTML = '';
@@ -819,6 +821,9 @@
     }
 
     route('reader', async (el, { chapterId }) => {
+      const readerAbort = new AbortController();
+      _currentRouteAbort = readerAbort;
+
       const ch = await Storage.chapters.get(chapterId);
       const book = await Storage.books.get(ch.bookId);
       const displayLang = await Storage.settings.get('displayLang:' + book.id, book.sourceLang);
@@ -920,8 +925,10 @@
                 word: g.word, lemma: g.lemma, gloss: g.gloss, sourceSentence: sentence,
                 bookId: book.id, chapterId: ch.id, displayLangAtSave: displayLang, exported: false
               });
-              const btn = document.getElementById('pop-save');
-              if (btn) btn.textContent = '✓ saved';
+              if (!pop.hidden) {
+                const btn = document.getElementById('pop-save');
+                if (btn) btn.textContent = '✓ saved';
+              }
             });
             document.getElementById('pop-close').addEventListener('click', () => { pop.hidden = true; });
           } catch (err) {
@@ -930,10 +937,10 @@
         });
 
         // Dismiss on scroll or outside click
-        document.addEventListener('scroll', () => { pop.hidden = true; }, { passive: true });
+        document.addEventListener('scroll', () => { pop.hidden = true; }, { passive: true, signal: readerAbort.signal });
         document.addEventListener('mousedown', (e) => {
           if (!pop.contains(e.target) && !e.target.closest('.w')) pop.hidden = true;
-        });
+        }, { signal: readerAbort.signal });
       }
     });
 
