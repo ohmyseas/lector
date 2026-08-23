@@ -181,6 +181,132 @@ async function runFlow(page) {
     await shot(page, 'B3-ru-playing.png');
     await ruPlayBtn.click();
 
+    // ---------- TEST 3a: EN generation + voice + play ----------
+    console.log('\n=== TEST 3a: Switch to EN, generate, voice, play ===');
+    await page.locator('.lang-pills .pill[data-lang="en"]').click();
+    await page.waitForTimeout(500);
+    await shot(page, 'C0-en-empty.png');
+
+    const enGenVisible = await page.locator('#btn-generate').isVisible().catch(() => false);
+    if (!enGenVisible) { fail('EN Generate button', 'not visible on EN empty state'); }
+    else {
+      pass('EN Generate button visible');
+      await page.locator('#btn-generate').click();
+      const enGenStart = Date.now();
+      let enGenDone = false;
+      for (let i = 0; i < 45; i++) {
+        const genGone = await page.locator('#btn-generate').isVisible().catch(() => false);
+        if (!genGone) { enGenDone = true; break; }
+        const prog = await page.locator('#gen-progress').textContent().catch(() => '');
+        if (i % 5 === 0) console.log(`    t+${((Date.now()-enGenStart)/1000).toFixed(1)}s ${prog}`);
+        if (prog.startsWith('Error:')) { fail('EN translation', prog); break; }
+        await page.waitForTimeout(2000);
+      }
+      if (enGenDone) {
+        pass(`EN translation completed in ${((Date.now()-enGenStart)/1000).toFixed(1)}s`);
+        const enBody = await page.locator('main.reader').textContent();
+        // Basic sanity: should contain some English word like "phenomena" or "compassion" or "empty"
+        if (enBody && /\b(phenomena|compassion|empty|nature|wisdom|method)\b/i.test(enBody)) {
+          pass(`EN text is actually English (${enBody.length} chars)`);
+          console.log(`    EN preview: ${enBody.slice(0, 200).replace(/\n/g,' ')}`);
+        } else {
+          fail('EN sanity', 'no expected English words in body');
+        }
+        await shot(page, 'C0b-en-generated.png');
+
+        // Voice EN
+        const enVoiceBtn = page.locator('.voice-btn');
+        if (await enVoiceBtn.isVisible().catch(() => false)) {
+          const enLabel = await enVoiceBtn.textContent();
+          if (enLabel?.includes('EN')) pass('Voice button labeled (EN)'); else fail('EN voice label', enLabel);
+          await enVoiceBtn.click();
+          const enVoiceStart = Date.now();
+          let enVoiceDone = false;
+          for (let i = 0; i < 60; i++) {
+            const gone = await enVoiceBtn.isVisible().catch(() => false);
+            if (!gone) { enVoiceDone = true; break; }
+            const label = await enVoiceBtn.textContent().catch(() => '');
+            if (i % 3 === 0) console.log(`    t+${((Date.now()-enVoiceStart)/1000).toFixed(1)}s ${label}`);
+            if (label?.startsWith('Error:')) { fail('EN voicing', label); break; }
+            await page.waitForTimeout(2000);
+          }
+          if (enVoiceDone) {
+            pass(`EN voicing completed in ${((Date.now()-enVoiceStart)/1000).toFixed(1)}s (George)`);
+            await page.locator('.play-btn').click();
+            await page.waitForTimeout(3000);
+            const enPlaying = await page.locator('.sent.playing').count();
+            if (enPlaying > 0) pass(`EN .sent.playing highlight (count=${enPlaying})`);
+            else fail('EN highlight', 'no .sent.playing');
+            await shot(page, 'C0c-en-playing.png');
+            await page.locator('.play-btn').click();
+          }
+        }
+      } else {
+        fail('EN translation', 'timeout');
+      }
+    }
+
+    // ---------- TEST 3b: PT generation + voice ----------
+    console.log('\n=== TEST 3b: Switch to PT, generate, voice ===');
+    await page.locator('.lang-pills .pill[data-lang="pt"]').click();
+    await page.waitForTimeout(500);
+    await shot(page, 'C0d-pt-empty.png');
+
+    const ptGenVisible = await page.locator('#btn-generate').isVisible().catch(() => false);
+    if (!ptGenVisible) { fail('PT Generate button', 'not visible on PT empty state'); }
+    else {
+      pass('PT Generate button visible');
+      await page.locator('#btn-generate').click();
+      const ptGenStart = Date.now();
+      let ptGenDone = false;
+      for (let i = 0; i < 45; i++) {
+        const genGone = await page.locator('#btn-generate').isVisible().catch(() => false);
+        if (!genGone) { ptGenDone = true; break; }
+        const prog = await page.locator('#gen-progress').textContent().catch(() => '');
+        if (prog.startsWith('Error:')) { fail('PT translation', prog); break; }
+        await page.waitForTimeout(2000);
+      }
+      if (ptGenDone) {
+        pass(`PT translation completed in ${((Date.now()-ptGenStart)/1000).toFixed(1)}s`);
+        const ptBody = await page.locator('main.reader').textContent();
+        // Portuguese sanity: expect "fenómenos" or "compaixão" or "vazio" or diacritics ã/õ/ç
+        if (ptBody && /(fen[óô]menos|compaix[ãa]o|vazio|natureza|sabedoria|[ãõç])/i.test(ptBody)) {
+          pass(`PT text is actually Portuguese (${ptBody.length} chars)`);
+          console.log(`    PT preview: ${ptBody.slice(0, 200).replace(/\n/g,' ')}`);
+        } else {
+          fail('PT sanity', 'no expected Portuguese words/diacritics in body');
+        }
+        await shot(page, 'C0e-pt-generated.png');
+
+        const ptVoiceBtn = page.locator('.voice-btn');
+        if (await ptVoiceBtn.isVisible().catch(() => false)) {
+          const ptLabel = await ptVoiceBtn.textContent();
+          if (ptLabel?.includes('PT')) pass('Voice button labeled (PT)');
+          await ptVoiceBtn.click();
+          const ptVoiceStart = Date.now();
+          let ptVoiceDone = false;
+          for (let i = 0; i < 60; i++) {
+            const gone = await ptVoiceBtn.isVisible().catch(() => false);
+            if (!gone) { ptVoiceDone = true; break; }
+            const label = await ptVoiceBtn.textContent().catch(() => '');
+            if (label?.startsWith('Error:')) { fail('PT voicing', label); break; }
+            await page.waitForTimeout(2000);
+          }
+          if (ptVoiceDone) {
+            pass(`PT voicing completed in ${((Date.now()-ptVoiceStart)/1000).toFixed(1)}s (Afonso)`);
+            await page.locator('.play-btn').click();
+            await page.waitForTimeout(3000);
+            const ptPlaying = await page.locator('.sent.playing').count();
+            if (ptPlaying > 0) pass(`PT .sent.playing highlight (count=${ptPlaying})`);
+            await shot(page, 'C0f-pt-playing.png');
+            await page.locator('.play-btn').click();
+          }
+        }
+      } else {
+        fail('PT translation', 'timeout');
+      }
+    }
+
     console.log('\n=== TEST 3: Import real Gampopa, verify subdivision produces many chapters ===');
     await page.evaluate(() => window.nav('library'));
     await page.waitForTimeout(500);

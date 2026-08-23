@@ -343,10 +343,15 @@
     /* ===== RWL Playback ===== */
     .sent.playing { background: #fff7d0; border-radius: 3px; }
     .wnow { border-bottom: 2px solid var(--accent); }
-    .play-btn { font-size: 18px; padding: 4px 12px; background: transparent; color: var(--fg-muted); }
-    .play-btn:hover:not(:disabled) { background: var(--border); color: var(--fg); }
-    .play-btn[disabled] { opacity: 0.4; cursor: not-allowed; }
-    .speed { font-family: var(--sans); font-size: 0.8rem; padding: 3px 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--fg); cursor: pointer; }
+    .player-controls { display: flex; align-items: center; gap: 4px; }
+    .pc-btn { font-size: 14px; padding: 4px 8px; background: transparent; color: var(--fg-muted); border: 1px solid transparent; border-radius: 4px; cursor: pointer; min-width: 32px; }
+    .pc-btn:hover:not(:disabled) { background: var(--border); color: var(--fg); }
+    .pc-btn[disabled] { opacity: 0.35; cursor: not-allowed; }
+    .play-btn { font-size: 16px; padding: 4px 12px; }
+    .speed { font-family: var(--sans); font-size: 0.8rem; padding: 3px 4px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card); color: var(--fg); cursor: pointer; margin-left: 4px; }
+    .pop-play-row { display: flex; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+    .pop-play-row button { font-size: 12px; padding: 4px 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+    .pop-play-row button:hover { background: var(--border); }
 
     /* ===== Recite mode ===== */
     .sent.reciting { outline: 2px dashed #b89b62; }
@@ -869,13 +874,73 @@
       },
       pause() { this.audioEl?.pause(); this._savePos(); },
       resume() { this.audioEl?.play(); },
+      prev() {
+        if (!this.chapter || this.idx <= 0) return;
+        this.idx = Math.max(0, this.idx - 1);
+        this._play().catch(err => console.error('[Player]', err));
+      },
+      skipNext() {
+        if (!this.chapter || this.idx >= this.sentences.length - 1) return;
+        this.idx++;
+        this._play().catch(err => console.error('[Player]', err));
+      },
       stop() {
         if (this.saveTimer) { clearInterval(this.saveTimer); this.saveTimer = null; }
         if (this.audioEl) { this.audioEl.pause(); if (this.audioEl.src) { URL.revokeObjectURL(this.audioEl.src); } this.audioEl = null; }
         document.querySelectorAll('.sent.playing, .wnow').forEach(x => x.classList.remove('playing', 'wnow'));
         this.chapter = null; this.book = null; this.sentences = []; this.timings = []; this.idx = 0; this.key = null;
-      }
+      },
+      isPlaying() { return !!(this.audioEl && !this.audioEl.paused); }
     };
+
+    // Play just ONE word — prefers cached sentence audio (seek+stop between timings), falls back to Flash TTS.
+    async function playWord(chapterId, sentence, wordText, voiceKeyStr, lang) {
+      const clean = wordText.replace(/[.,;:!?¡¿"'()\[\]«»—–…]/g, '').toLowerCase().trim();
+      if (!clean) return;
+      // Try cached slice first
+      try {
+        const hash = await sentenceHash(sentence + '|' + voiceKeyStr);
+        const rec = await Storage.audio.get(chapterId, hash, voiceKeyStr);
+        if (rec && rec.timings) {
+          const w = rec.timings.find(t => (t.word || '').toLowerCase() === clean);
+          if (w && typeof w.startSec === 'number' && typeof w.endSec === 'number') {
+            const audio = new Audio(URL.createObjectURL(rec.blob));
+            audio.currentTime = w.startSec;
+            const endTime = w.endSec + 0.05;
+            const onTime = () => {
+              if (audio.currentTime >= endTime) {
+                audio.pause();
+                audio.removeEventListener('timeupdate', onTime);
+                URL.revokeObjectURL(audio.src);
+              }
+            };
+            audio.addEventListener('timeupdate', onTime);
+            await audio.play();
+            return;
+          }
+        }
+      } catch (err) { console.warn('[playWord] cache slice failed', err); }
+      // Fallback: Flash TTS for single word
+      const r = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text: clean, model: 'flash_v2_5', voice: 'narrator', lang, withTimestamps: false })
+      });
+      if (!r.ok) return;
+      const blob = await r.blob();
+      new Audio(URL.createObjectURL(blob)).play();
+    }
+
+    async function playSentence(text, lang) {
+      const r = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, model: 'flash_v2_5', voice: 'narrator', lang, withTimestamps: false })
+      });
+      if (!r.ok) return;
+      const blob = await r.blob();
+      new Audio(URL.createObjectURL(blob)).play();
+    }
 
     // ============ Import screen ============
     route('import', async (el) => {
@@ -1155,13 +1220,18 @@
           <div class="pills level-pills"${displayLang === 'es' ? '' : ' hidden'}>
             ${['A2','B1','B2','C1'].map(lv => `<button data-level="${lv}" class="pill${lv === level ? ' active' : ''}">${lv}</button>`).join('')}
           </div>
-          <button class="play-btn">&#9654;</button>
-          <select class="speed">
-            <option value="0.75">0.75&times;</option>
-            <option value="1" selected>1&times;</option>
-            <option value="1.25">1.25&times;</option>
-            <option value="1.5">1.5&times;</option>
-          </select>
+          <div class="player-controls">
+            <button class="pc-btn prev-btn" title="Previous sentence">&#9198;</button>
+            <button class="pc-btn play-btn" title="Play">&#9654;</button>
+            <button class="pc-btn stop-btn" title="Stop">&#9724;</button>
+            <button class="pc-btn next-btn" title="Next sentence">&#9197;</button>
+            <select class="speed" title="Playback speed">
+              <option value="0.75">0.75&times;</option>
+              <option value="1" selected>1&times;</option>
+              <option value="1.25">1.25&times;</option>
+              <option value="1.5">1.5&times;</option>
+            </select>
+          </div>
         </header>
         <main class="reader">${paragraphsHtml}<div id="popover" hidden></div></main>`;
 
@@ -1214,30 +1284,71 @@
         });
       }
 
-      // ---- RWL: Play button + speed selector (per-language) ----
+      // ---- RWL: Full player controls (prev / play-pause / stop / next / speed) ----
       const playBtn = el.querySelector('.play-btn');
+      const prevBtn = el.querySelector('.prev-btn');
+      const nextBtn = el.querySelector('.next-btn');
+      const stopBtn = el.querySelector('.stop-btn');
       const isVoiced = !!ch.voiced?.[currentKey];
-      playBtn.disabled = !isVoiced;
+      [playBtn, prevBtn, nextBtn, stopBtn].forEach(b => { b.disabled = !isVoiced; });
       playBtn.title = isVoiced ? `Play ${langLabel} from position` : `Voice this chapter in ${langLabel} first`;
+
+      const syncPlayBtn = () => {
+        setTimeout(() => { playBtn.innerHTML = Player.isPlaying() ? '&#10074;&#10074;' : '&#9654;'; }, 100);
+      };
+
       playBtn.addEventListener('click', () => {
-        if (Player.audioEl && !Player.audioEl.paused) { Player.pause(); playBtn.textContent = '▶'; return; }
-        if (Player.audioEl) { Player.resume(); playBtn.textContent = '⏸'; return; }
+        if (Player.isPlaying()) { Player.pause(); playBtn.innerHTML = '&#9654;'; return; }
+        if (Player.audioEl) { Player.resume(); playBtn.innerHTML = '&#10074;&#10074;'; return; }
         const resume = ch.playbackResume;
         const startIdx = (resume && resume.key === currentKey) ? resume.sentenceIndex : 0;
         Player.start(ch, book, displayLang, level, startIdx);
-        setTimeout(() => { playBtn.textContent = Player.audioEl && !Player.audioEl.paused ? '⏸' : '▶'; }, 100);
+        syncPlayBtn();
       });
+      prevBtn.addEventListener('click', () => {
+        if (!Player.audioEl) {
+          // Not started yet — start playback from beginning
+          Player.start(ch, book, displayLang, level, 0);
+        } else {
+          Player.prev();
+        }
+        syncPlayBtn();
+      });
+      nextBtn.addEventListener('click', () => {
+        if (!Player.audioEl) {
+          Player.start(ch, book, displayLang, level, 0);
+        } else {
+          Player.skipNext();
+        }
+        syncPlayBtn();
+      });
+      stopBtn.addEventListener('click', () => { Player.stop(); playBtn.innerHTML = '&#9654;'; });
+
       el.querySelector('.speed').value = Player.speed;
       el.querySelector('.speed').addEventListener('change', (e) => Player.setSpeed(parseFloat(e.target.value)));
 
-      // ---- RWL: Alt+click plays from that sentence ----
+      // ---- Alt+click on a sentence plays RWL from that sentence ----
       el.querySelector('main.reader').addEventListener('click', (e) => {
         if (!e.altKey) return;
         const sent = e.target.closest('.sent');
         if (!sent) return;
         const idx = parseInt(sent.dataset.sent);
         Player.start(ch, book, displayLang, level, idx);
-        playBtn.textContent = '⏸';
+        syncPlayBtn();
+      });
+
+      // ---- Alt+click on a paragraph (empty area) plays from its first sentence ----
+      // Paragraphs are <p>; sentences are .sent inside <p>. Detect click on <p> where target isn't a sentence.
+      el.querySelector('main.reader').addEventListener('click', (e) => {
+        if (!e.altKey) return;
+        if (e.target.closest('.sent')) return;   // already handled above
+        const p = e.target.closest('main.reader p');
+        if (!p) return;
+        const firstSent = p.querySelector('.sent');
+        if (!firstSent) return;
+        const idx = parseInt(firstSent.dataset.sent);
+        Player.start(ch, book, displayLang, level, idx);
+        syncPlayBtn();
       });
 
       // ---- Shift+click speaks sentence (ephemeral Flash, in displayLang's voice) ----
@@ -1306,13 +1417,20 @@
             const j = await r.json();
             if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
             const g = j.result;
+            // Find the paragraph text so the paragraph-play button knows what to speak.
+            const paraEl = w.closest('main.reader p');
+            const paragraphText = paraEl ? paraEl.textContent.trim() : sentence;
             pop.innerHTML = `
               <div class="pop-word"><b>${escapeHtml(g.word)}</b> <span class="pop-lemma">(${escapeHtml(g.lemma)})</span></div>
               <div class="pop-gloss">${escapeHtml(g.gloss)}</div>
               <div class="pop-note">${escapeHtml(g.note || '')}</div>
+              <div class="pop-play-row">
+                <button id="pop-play-word" title="Play just this word">&#128266; word</button>
+                <button id="pop-play-sent" title="Play sentence">&#128266; sentence</button>
+                <button id="pop-play-para" title="Play paragraph">&#128266; paragraph</button>
+              </div>
               <div class="pop-actions">
                 <button id="pop-save">+ save</button>
-                <button id="pop-speak">🔊</button>
                 <button id="pop-close">✕</button>
               </div>`;
             document.getElementById('pop-save').addEventListener('click', async () => {
@@ -1325,15 +1443,14 @@
                 if (btn) btn.textContent = '✓ saved';
               }
             });
-            document.getElementById('pop-speak').addEventListener('click', async () => {
-              const r = await fetch('/api/tts', {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ text: sentence, model: 'flash_v2_5', voice: book.narratorVoice || 'narrator', withTimestamps: false })
-              });
-              if (!r.ok) return alert('TTS error');
-              const blob = await r.blob();
-              new Audio(URL.createObjectURL(blob)).play();
+            document.getElementById('pop-play-word').addEventListener('click', () => {
+              playWord(ch.id, sentence, word, currentKey, displayLang);
+            });
+            document.getElementById('pop-play-sent').addEventListener('click', () => {
+              playSentence(sentence, displayLang);
+            });
+            document.getElementById('pop-play-para').addEventListener('click', () => {
+              playSentence(paragraphText, displayLang);
             });
             document.getElementById('pop-close').addEventListener('click', () => { pop.hidden = true; });
           } catch (err) {

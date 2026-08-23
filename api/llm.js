@@ -49,7 +49,7 @@ Output MUST be a raw JSON object — no markdown fences, no \`\`\`json, no comme
 Required shape: {"text": string}.`
 };
 
-const LANG_NAMES = { es: 'Spanish', en: 'English', ru: 'Russian' };
+const LANG_NAMES = { es: 'Spanish', en: 'English', ru: 'Russian', pt: 'Portuguese' };
 
 function pickModel(task) {
   return task === 'gloss' ? MODEL_HAIKU : MODEL_SONNET;
@@ -64,7 +64,7 @@ function buildUser(task, input) {
   }
   if (task === 'translate_chunk') {
     const target = input.targetLang || 'es';
-    const targetName = { es: 'Spanish', en: 'English', ru: 'Russian' }[target] || 'Spanish';
+    const targetName = LANG_NAMES[target] || 'Spanish';
     const levelHint = target === 'es' ? ` (${input.level || 'B1'})` : '';
     const prev = input.prevContext ? `Previous paragraph (context, do not translate):\n${input.prevContext}\n\n` : '';
     const next = input.nextContext ? `\n\nNext paragraph (context, do not translate):\n${input.nextContext}` : '';
