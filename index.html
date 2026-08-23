@@ -754,6 +754,43 @@
       );
     });
 
+    // ============ Spanish generator ============
+    async function generateSpanish(chapter, book, level, onProgress) {
+      const source = chapter.sourceText || chapter.versions?.[book.sourceLang];
+      if (!source) throw new Error('no source text');
+      const paras = splitParagraphs(source);
+      const out = [];
+      for (let i = 0; i < paras.length; i++) {
+        onProgress?.(i, paras.length);
+        const r = await fetch('/api/llm', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            task: 'translate_chunk',
+            input: {
+              text: paras[i],
+              targetLang: 'es',
+              level,
+              prevContext: paras[i-1] || undefined,
+              nextContext: paras[i+1] || undefined
+            },
+            glossary: book.glossary || [],
+            bookMeta: { title: book.title, author: book.author, sourceLang: book.sourceLang }
+          })
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || 'translate failed at para ' + i);
+        out.push(j.result.text);
+      }
+      onProgress?.(paras.length, paras.length);
+      // Persist
+      const updated = await Storage.chapters.get(chapter.id);
+      updated.versions = updated.versions || {};
+      updated.versions.es = { ...(updated.versions.es || {}), [level]: out.join('\n\n') };
+      await Storage.chapters.put({ ...updated, sourceText: source });
+      return updated.versions.es[level];
+    }
+
     // ============ Reader screen ============
     route('reader', async (el, { chapterId }) => {
       const ch = await Storage.chapters.get(chapterId);
@@ -784,7 +821,9 @@
                 `<p>${splitSentences(p).map((s, i) => `<span class="sent" data-sent="${i}">${escapeHtml(s)}</span>`).join(' ')}</p>`
               ).join('')
             : `<div class="empty"><p>No text for <b>${escapeHtml(displayLang)}${displayLang === 'es' ? ' ' + escapeHtml(level) : ''}</b> yet.</p>
-               <button disabled>Generate (Task 7 wires this up)</button></div>`}
+               ${displayLang === 'es'
+                 ? `<button id="btn-generate">Generate ES ${escapeHtml(level)}</button><div id="gen-progress"></div>`
+                 : `<p><i>Only Spanish generation is supported. Import an English or Russian version manually if needed.</i></p>`}</div>`}
         </main>`;
 
       el.querySelector('#btn-back-book').addEventListener('click', () => nav('book', { id: book.id }));
@@ -796,6 +835,20 @@
         await Storage.settings.set('level:' + book.id, p.dataset.level);
         nav('reader', { chapterId });
       }));
+
+      document.getElementById('btn-generate')?.addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        const prog = document.getElementById('gen-progress');
+        try {
+          await generateSpanish(ch, book, level, (done, total) => {
+            prog.textContent = `Translating paragraph ${done} / ${total}...`;
+          });
+          nav('reader', { chapterId });
+        } catch (err) {
+          prog.textContent = 'Error: ' + escapeHtml(err.message);
+          e.target.disabled = false;
+        }
+      });
     });
 
     // stubs so nav() doesn't throw before those screens exist
