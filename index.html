@@ -13,7 +13,7 @@
       --serif: 'Literata', Georgia, 'Times New Roman', serif;
       --sans: 'Inter', system-ui, -apple-system, sans-serif;
 
-      /* Colors */
+      /* Colors — light theme (default) */
       --fg:      #1a1a1a;
       --fg-muted:#555;
       --bg:      #fafaf8;
@@ -21,6 +21,8 @@
       --accent:  #2d6a4f;
       --accent-h:#1b4332;
       --border:  #e4e4e0;
+      --highlight-bg: #fff7d0;
+      --breakdown-bg: #f7f4ee;
 
       /* Spacing scale */
       --sp-1: 0.25rem;
@@ -34,6 +36,37 @@
       /* Layout */
       --max-w: 52rem;
       --radius: 10px;
+
+      /* Reader typography (user-adjustable) */
+      --reader-font-size: 1.05rem;
+      --reader-line-height: 1.75;
+    }
+
+    /* Dark theme */
+    :root[data-theme="dark"] {
+      --fg:      #e8e6e0;
+      --fg-muted:#a0a0a0;
+      --bg:      #14161a;
+      --bg-card: #1e2126;
+      --accent:  #5ba077;
+      --accent-h:#79b990;
+      --border:  #2f3238;
+      --highlight-bg: #3a3620;
+      --breakdown-bg: #1f1d16;
+    }
+    /* Auto: honour system preference */
+    @media (prefers-color-scheme: dark) {
+      :root[data-theme="auto"] {
+        --fg:      #e8e6e0;
+        --fg-muted:#a0a0a0;
+        --bg:      #14161a;
+        --bg-card: #1e2126;
+        --accent:  #5ba077;
+        --accent-h:#79b990;
+        --border:  #2f3238;
+        --highlight-bg: #3a3620;
+        --breakdown-bg: #1f1d16;
+      }
     }
 
     /* ===== Reset ===== */
@@ -324,11 +357,85 @@
     .w:hover { background: #fffbe0; }
 
     /* ===== Breakdown (Frank-style) ===== */
-    .breakdown { background: #f7f4ee; border-left: 3px solid #b89b62; padding: 10px 14px; margin: 6px 0 12px; font-family: var(--sans); font-size: 14px; position: relative; }
+    .breakdown { background: var(--breakdown-bg); border-left: 3px solid #b89b62; padding: 10px 14px; margin: 6px 0 12px; font-family: var(--sans); font-size: 14px; position: relative; }
     .bd-ch { display: inline-block; margin-right: 6px; }
     .bd-g { color: #7a6b48; font-style: italic; font-size: 12px; }
     .bd-clean { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d7c99a; }
-    .bd-close { position: absolute; top: 6px; right: 8px; background: transparent; border: 0; cursor: pointer; font-size: 14px; }
+    .bd-close { position: absolute; top: 6px; right: 8px; background: transparent; border: 0; cursor: pointer; font-size: 14px; color: var(--fg-muted); }
+
+    /* ===== Reader body with user-adjustable typography ===== */
+    main.reader { font-size: var(--reader-font-size); line-height: var(--reader-line-height); }
+    main.reader p { margin: 0 0 var(--sp-6); position: relative; }
+    main.reader.show-sent-nums .sent::before {
+      content: attr(data-sent);
+      position: absolute; left: -2.5rem;
+      font-family: var(--sans); font-size: 0.7rem; color: var(--fg-muted);
+      opacity: 0.5; padding-top: 3px;
+    }
+    /* Progress bar under topbar */
+    .reader-progress {
+      position: sticky; top: 100%; z-index: 8;
+      height: 3px; background: var(--border);
+      margin: -3px 0 0;
+    }
+    .reader-progress-fill {
+      height: 100%; background: var(--accent);
+      width: 0%; transition: width 0.3s;
+    }
+    /* Loop mode indicator */
+    .loop-btn.loop-sent { color: var(--accent); border-color: var(--accent); background: var(--accent); color: white; }
+    .loop-btn.loop-para { color: var(--accent); border-color: var(--accent); background: var(--accent-h); color: white; }
+    /* Bookmark marker on sentences */
+    .sent.bookmarked::after {
+      content: '\1F516';
+      position: absolute; margin-left: 4px;
+      font-size: 0.8em; opacity: 0.7;
+    }
+    /* Modal (for confirm-cost dialog etc.) */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: center; justify-content: center; padding: var(--sp-4); }
+    .modal { background: var(--bg-card); color: var(--fg); border-radius: var(--radius); padding: var(--sp-6); max-width: 480px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+    .modal h3 { margin-bottom: var(--sp-3); }
+    .modal .modal-body { margin: var(--sp-3) 0; font-size: 0.95rem; line-height: 1.5; color: var(--fg-muted); }
+    .modal .modal-body b { color: var(--fg); }
+    .modal .modal-actions { display: flex; gap: var(--sp-2); justify-content: flex-end; margin-top: var(--sp-4); }
+    .modal .modal-actions button { padding: var(--sp-2) var(--sp-4); font-size: 0.9rem; }
+    .modal-actions .primary { background: var(--accent); color: white; border: 1px solid var(--accent); border-radius: 4px; }
+    .modal-actions .secondary { background: var(--bg-card); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; }
+    /* Search box */
+    .search-row { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); align-items: center; }
+    .search-input { flex: 1; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: 4px; font-family: var(--sans); font-size: 0.9rem; background: var(--bg-card); color: var(--fg); }
+    .search-input:focus { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .sort-select { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: 4px; font-family: var(--sans); font-size: 0.9rem; background: var(--bg-card); color: var(--fg); }
+    /* Chapter list actions (delete/rename) */
+    .chapter-row { display: flex; align-items: center; gap: var(--sp-2); }
+    .ch-actions { margin-left: auto; opacity: 0.4; display: flex; gap: 2px; }
+    li.chapter-row:hover .ch-actions { opacity: 1; }
+    .ch-actions button { background: transparent; border: 1px solid transparent; padding: 2px 6px; font-size: 12px; color: var(--fg-muted); cursor: pointer; border-radius: 3px; }
+    .ch-actions button:hover { background: var(--border); color: var(--fg); }
+    .ch-actions .ch-delete:hover { background: #fdd; color: #c33; }
+    /* Glossary editor */
+    .glossary-editor { margin: var(--sp-6) 0; padding: var(--sp-4); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); }
+    .glossary-editor h3 { margin-bottom: var(--sp-3); font-size: 1rem; }
+    .glossary-list { display: grid; grid-template-columns: 1fr 1fr auto; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+    .glossary-list input { padding: var(--sp-2); border: 1px solid var(--border); border-radius: 4px; font-size: 0.85rem; background: var(--bg); color: var(--fg); font-family: var(--sans); }
+    .glossary-list .del-term { background: transparent; border: 1px solid var(--border); padding: 2px 8px; cursor: pointer; color: var(--fg-muted); border-radius: 3px; }
+    .glossary-list .del-term:hover { background: #fdd; color: #c33; }
+    /* Settings panel additions */
+    .settings-section { padding: var(--sp-4); background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: var(--sp-4); }
+    .settings-section h3 { margin-bottom: var(--sp-3); font-size: 1rem; }
+    .settings-row { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-2); font-size: 0.9rem; }
+    .settings-row label { flex: 1; }
+    .settings-row select, .settings-row input[type="range"], .settings-row input[type="url"] { padding: var(--sp-2); border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 0.85rem; }
+    .settings-row input[type="range"] { flex: 2; }
+    .settings-row input[type="url"] { min-width: 220px; }
+    .settings-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-3); }
+    .settings-actions button { padding: var(--sp-2) var(--sp-3); font-size: 0.85rem; }
+    /* Bookmark list in book detail */
+    .bookmarks-list { padding: 0; list-style: none; }
+    .bookmarks-list li { padding: var(--sp-2); border-bottom: 1px solid var(--border); font-size: 0.85rem; cursor: pointer; }
+    .bookmarks-list li:hover { background: var(--border); }
+    /* Vocab search + edit */
+    .vocab-list td.editable[contenteditable="true"] { outline: 2px solid var(--accent); background: var(--bg-card); }
 
     /* ===== Voice button ===== */
     .voice-btn {
@@ -341,7 +448,7 @@
     .voice-btn:disabled { opacity: 0.6; cursor: default; }
 
     /* ===== RWL Playback ===== */
-    .sent.playing { background: #fff7d0; border-radius: 3px; }
+    .sent.playing { background: var(--highlight-bg); border-radius: 3px; }
     .wnow { border-bottom: 2px solid var(--accent); }
     .player-controls { display: flex; align-items: center; gap: 4px; }
     .pc-btn { font-size: 14px; padding: 4px 8px; background: transparent; color: var(--fg-muted); border: 1px solid transparent; border-radius: 4px; cursor: pointer; min-width: 32px; }
@@ -448,6 +555,34 @@
       return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     }
 
+    // ============ Cross-tab sync via BroadcastChannel ============
+    // Storage.chapters.put + Storage.books.put + Storage.vocab.put broadcast a change event.
+    // Other tabs receive it and can re-render if they happen to display affected state.
+    const CrossTab = (function() {
+      const ch = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('lector-sync') : null;
+      function post(kind, id) { try { ch?.postMessage({ kind, id, ts: Date.now() }); } catch {} }
+      function listen(fn) { if (ch) ch.addEventListener('message', ev => fn(ev.data)); }
+      return { post, listen };
+    })();
+    window.CrossTab = CrossTab;
+
+    // ============ Preferences (theme + reader typography + sentence numbers) ============
+    // Loaded EARLY so first render already reflects user's choice.
+    async function applyPrefs() {
+      try {
+        const theme = await LF_META.getItem('setting:theme') || 'auto';
+        const fontSize = await LF_META.getItem('setting:readerFontSize') || 1.05;
+        const lineHeight = await LF_META.getItem('setting:readerLineHeight') || 1.75;
+        const showNums = await LF_META.getItem('setting:showSentenceNumbers') || false;
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.style.setProperty('--reader-font-size', fontSize + 'rem');
+        document.documentElement.style.setProperty('--reader-line-height', lineHeight);
+        window.__prefsShowNums = showNums;
+      } catch (err) { console.warn('applyPrefs failed', err); }
+    }
+    // Fire immediately
+    applyPrefs();
+
     const Storage = {
       books: {
         async list() {
@@ -462,9 +597,11 @@
         async get(id) { return LF_META.getItem(`book:${id}`); },
         async put(book) {
           if (!book.id) book.id = uid();
+          if (!book.createdAt) book.createdAt = Date.now();
           const ids = (await LF_META.getItem('books:index')) || [];
           if (!ids.includes(book.id)) { ids.push(book.id); await LF_META.setItem('books:index', ids); }
           await LF_META.setItem(`book:${book.id}`, book);
+          try { CrossTab.post('book:put', book.id); } catch {}
           return book;
         },
         async delete(id) {
@@ -473,6 +610,7 @@
           const ids = ((await LF_META.getItem('books:index')) || []).filter(x => x !== id);
           await LF_META.setItem('books:index', ids);
           await LF_META.removeItem(`book:${id}`);
+          try { CrossTab.post('book:delete', id); } catch {}
           // Purge audio blobs owned by these chapters (audio store keys are `chapterId:hash:voiceKey`)
           try {
             const lru = (await LF_AUDIO.getItem('__lru__')) || [];
@@ -559,6 +697,7 @@
           meta._langs = Array.from(new Set([...priorLangs, ...langsWritten]));
           meta._esLevels = Array.from(new Set([...priorEs, ...esLevelsWritten]));
           await LF_META.setItem(`chapter:${chapter.id}`, meta);
+          try { CrossTab.post('chapter:put', chapter.id); } catch {}
           return chapter;
         },
         async delete(id) {
@@ -572,6 +711,7 @@
           const knownLangs = c._langs || ['ru','en','pt'];
           for (const lang of knownLangs) await LF_TEXT.removeItem(`chapter:${id}:${lang}`);
           for (const lvl of (c._esLevels || ['A2','B1','B2','C1'])) await LF_TEXT.removeItem(`chapter:${id}:es:${lvl}`);
+          try { CrossTab.post('chapter:delete', id); } catch {}
           // audio blobs cleaned lazily
         }
       },
@@ -593,6 +733,7 @@
           const ids = (await LF_META.getItem('vocab:index')) || [];
           if (!ids.includes(entry.id)) { ids.push(entry.id); await LF_META.setItem('vocab:index', ids); }
           await LF_META.setItem(`vocab:${entry.id}`, entry);
+          try { CrossTab.post('vocab:put', entry.id); } catch {}
           return entry;
         },
         async delete(word, bookId) {
@@ -655,18 +796,63 @@
     // ============ Router (dead simple) ============
     const routes = {};
     let _currentRouteAbort = null;
+    let _currentRoute = null;
+    let _currentRouteParams = null;
     function route(name, renderFn) { routes[name] = renderFn; }
     function nav(name, params = {}) {
       if (_currentRouteAbort) { _currentRouteAbort.abort(); _currentRouteAbort = null; }
       window.scrollTo(0,0);
       const el = document.getElementById('app');
       el.innerHTML = '';
+      _currentRoute = name;
+      _currentRouteParams = params;
       routes[name](el, params);
     }
+
+    // Cross-tab: if another tab wrote a book / chapter / vocab entry, re-render current view.
+    // Simple heuristic: refresh whatever route is currently displayed (except reader — playing audio there).
+    CrossTab.listen((msg) => {
+      if (!_currentRoute) return;
+      if (_currentRoute === 'reader') return;   // don't yank the reader mid-play
+      // Debounce quick bursts
+      clearTimeout(window.__crossTabDebounce);
+      window.__crossTabDebounce = setTimeout(() => nav(_currentRoute, _currentRouteParams || {}), 300);
+    });
 
     // ============ Library screen ============
     route('library', async (el) => {
       const books = await Storage.books.list();
+      // Load persisted filter/sort
+      const savedSearch = await Storage.settings.get('librarySearch', '');
+      const savedSort = await Storage.settings.get('librarySort', 'title');
+      const applyFilter = (query, sortMode) => {
+        const q = (query || '').toLowerCase().trim();
+        let filtered = books;
+        if (q) filtered = books.filter(b =>
+          (b.title || '').toLowerCase().includes(q) ||
+          (b.author || '').toLowerCase().includes(q) ||
+          (b.description || '').toLowerCase().includes(q)
+        );
+        if (sortMode === 'title') filtered = [...filtered].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+        else if (sortMode === 'author') filtered = [...filtered].sort((a, b) => (a.author || '').localeCompare(b.author || ''));
+        else if (sortMode === 'recent') filtered = [...filtered].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        else if (sortMode === 'chapters') filtered = [...filtered].sort((a, b) => (b.chapterCount || 0) - (a.chapterCount || 0));
+        return filtered;
+      };
+      const initialFiltered = applyFilter(savedSearch, savedSort);
+      const renderCards = (list) => list.length === 0
+        ? `<div class="empty"><p>No books match.</p></div>`
+        : list.map(b => `
+          <article class="book-card" data-id="${escapeHtml(b.id)}">
+            <div class="book-actions">
+              <button class="book-edit" data-id="${escapeHtml(b.id)}" title="Edit book title, author, description">&#9998;</button>
+              <button class="book-delete" data-id="${escapeHtml(b.id)}" title="Delete this book (irreversible)">&#128465;</button>
+            </div>
+            <h2>${escapeHtml(b.title)}</h2>
+            <p class="author">${escapeHtml(b.author || '')}${b.description ? '<br><small>' + escapeHtml(b.description) + '</small>' : ''}</p>
+            <p class="meta">${escapeHtml(b.chapterCount ?? 0)} chapters</p>
+            <button class="continue" data-id="${escapeHtml(b.id)}">&#9654; Continue</button>
+          </article>`).join('');
       el.innerHTML = `
         <header class="topbar"><h1>lector</h1>
           <div class="actions">
@@ -678,52 +864,65 @@
         <main class="library">
           ${books.length === 0
             ? `<div class="empty"><p>No books yet.</p><button id="btn-import-2">Import your first book</button></div>`
-            : books.map(b => `
-              <article class="book-card" data-id="${escapeHtml(b.id)}">
-                <div class="book-actions">
-                  <button class="book-edit" data-id="${escapeHtml(b.id)}" title="Edit book title, author, description">&#9998;</button>
-                  <button class="book-delete" data-id="${escapeHtml(b.id)}" title="Delete this book (irreversible)">&#128465;</button>
-                </div>
-                <h2>${escapeHtml(b.title)}</h2>
-                <p class="author">${escapeHtml(b.author || '')}${b.description ? '<br><small>' + escapeHtml(b.description) + '</small>' : ''}</p>
-                <p class="meta">${escapeHtml(b.chapterCount ?? 0)} chapters</p>
-                <button class="continue" data-id="${escapeHtml(b.id)}">&#9654; Continue</button>
-              </article>`).join('')}
+            : `<div class="search-row">
+                 <input class="search-input" id="lib-search" placeholder="Search by title / author / description…" value="${escapeHtml(savedSearch)}">
+                 <select class="sort-select" id="lib-sort">
+                   <option value="title" ${savedSort==='title'?'selected':''}>Sort: Title</option>
+                   <option value="author" ${savedSort==='author'?'selected':''}>Sort: Author</option>
+                   <option value="recent" ${savedSort==='recent'?'selected':''}>Sort: Recently added</option>
+                   <option value="chapters" ${savedSort==='chapters'?'selected':''}>Sort: Chapter count</option>
+                 </select>
+               </div>
+               <div id="lib-cards">${renderCards(initialFiltered)}</div>`}
         </main>`;
+      const wireCards = () => {
+        el.querySelectorAll('.book-card').forEach(c => c.addEventListener('click', (ev) => {
+          if (ev.target.closest('.book-actions')) return;
+          nav('book', { id: c.dataset.id });
+        }));
+        el.querySelectorAll('.book-edit').forEach(btn => btn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          nav('book', { id: btn.dataset.id, edit: true });
+        }));
+        el.querySelectorAll('.book-delete').forEach(btn => btn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          const bid = btn.dataset.id;
+          const b = books.find(x => x.id === bid);
+          const bookLabel = b ? `${b.title}` : 'this book';
+          if (!confirm(`Delete "${bookLabel}"? This removes all chapters, translations, cached audio, reading positions, and bookmarks for this book. Vocabulary saved from it stays. Cannot be undone.`)) return;
+          btn.disabled = true;
+          btn.textContent = '…';
+          try {
+            await Storage.books.delete(bid);
+            nav('library');
+          } catch (err) {
+            alert('Delete failed: ' + err.message);
+            btn.disabled = false;
+            btn.textContent = '\u{1F5D1}';
+          }
+        }));
+      };
+      // Wire search + sort
+      const searchInp = el.querySelector('#lib-search');
+      const sortSel = el.querySelector('#lib-sort');
+      const cardsBox = el.querySelector('#lib-cards');
+      const rerender = async () => {
+        const q = searchInp?.value || '';
+        const s = sortSel?.value || 'title';
+        await Storage.settings.set('librarySearch', q);
+        await Storage.settings.set('librarySort', s);
+        if (cardsBox) cardsBox.innerHTML = renderCards(applyFilter(q, s));
+        wireCards();
+      };
+      searchInp?.addEventListener('input', rerender);
+      sortSel?.addEventListener('change', rerender);
       document.getElementById('btn-import')?.addEventListener('click', () => nav('import'));
       document.getElementById('btn-import-2')?.addEventListener('click', () => nav('import'));
       document.getElementById('btn-vocab')?.addEventListener('click', () => nav('vocab'));
       document.getElementById('btn-settings')?.addEventListener('click', () => nav('settings'));
-      // Card click opens book; but IGNORE clicks that came from the actions bar
-      el.querySelectorAll('.book-card').forEach(c => c.addEventListener('click', (ev) => {
-        if (ev.target.closest('.book-actions')) return;
-        nav('book', { id: c.dataset.id });
-      }));
-      // Edit button on each card → jump to book detail in edit mode via location state.
-      // Simpler: nav to book, book route reads a `?edit=1` flag by extending nav params.
-      el.querySelectorAll('.book-edit').forEach(btn => btn.addEventListener('click', async (ev) => {
-        ev.stopPropagation();
-        nav('book', { id: btn.dataset.id, edit: true });
-      }));
-      // Delete button on each card: confirm → cascade delete (chapters + text + audio)
-      el.querySelectorAll('.book-delete').forEach(btn => btn.addEventListener('click', async (ev) => {
-        ev.stopPropagation();
-        const id = btn.dataset.id;
-        const b = books.find(x => x.id === id);
-        const bookLabel = b ? `${b.title}` : 'this book';
-        if (!confirm(`Delete "${bookLabel}"? This removes all chapters, translations, cached audio, and reading positions for this book. Vocabulary saved from it stays. This cannot be undone.`)) return;
-        btn.disabled = true;
-        btn.textContent = '…';
-        try {
-          await Storage.books.delete(id);
-          nav('library');
-        } catch (err) {
-          alert('Delete failed: ' + err.message);
-          btn.disabled = false;
-          btn.textContent = '\u{1F5D1}';
-        }
-      }));
+      wireCards();
     });
+
 
     // ============ splitIntoChapters ============
     const MAX_CHAPTER_CHARS = 25000;  // subdivide larger chunks so single-chapter LLM cost stays bounded
@@ -915,8 +1114,15 @@
 
     // ============ RWL Playback Engine ============
     // Language-aware: reads audio from cache keyed by voiceKey(targetLang, level).
+    // Also supports loop modes (off/sentence/paragraph) and cross-chapter continuous playback.
     const Player = {
-      audioEl: null, chapter: null, book: null, sentences: [], key: null, idx: 0, timings: [], speed: 1, saveTimer: null,
+      audioEl: null, chapter: null, book: null, sentences: [], sentenceParaIdx: [],
+      key: null, targetLang: null, level: null, idx: 0, timings: [], speed: 1,
+      loopMode: 'off',     // 'off' | 'sentence' | 'paragraph'
+      continuous: false,   // auto-advance to next chapter at end
+      saveTimer: null,
+      progressCb: null,    // (idx, total) called on every advance for UI
+      chapterEndCb: null,  // callback when chapter finishes (for continuous flow)
       async start(chapter, book, targetLang, level, fromIdx = 0) {
         this.stop();
         // Kill any orphan ephemeral audio too — otherwise word/sentence popover audio would play in parallel with RWL.
@@ -928,18 +1134,27 @@
         }
         const body = bodyForLang(chapter, targetLang, level);
         if (!body) { console.warn('[Player] no body text for', targetLang, level); return; }
-        this.chapter = chapter; this.book = book; this.key = key;
-        this.sentences = splitParagraphs(body).flatMap(splitSentences);
-        this.idx = fromIdx;
+        this.chapter = chapter; this.book = book;
+        this.key = key; this.targetLang = targetLang; this.level = level;
+        // Build sentence list AND per-sentence paragraph index (for loop-paragraph)
+        this.sentences = [];
+        this.sentenceParaIdx = [];
+        splitParagraphs(body).forEach((p, pi) => {
+          splitSentences(p).forEach(s => {
+            this.sentences.push(s);
+            this.sentenceParaIdx.push(pi);
+          });
+        });
+        this.idx = Math.max(0, Math.min(fromIdx, this.sentences.length - 1));
         this.audioEl = new Audio();
         this.audioEl.playbackRate = this.speed;
-        this.audioEl.addEventListener('ended', () => this._next());
+        this.audioEl.addEventListener('ended', () => this._onSentenceEnd());
         this.audioEl.addEventListener('timeupdate', () => this._highlightWord());
         this._play().catch(err => { console.error('[Player]', err); this.stop(); });
         this.saveTimer = setInterval(() => this._savePos(), 5000);
       },
       async _play() {
-        if (this.idx >= this.sentences.length) return this.stop();
+        if (this.idx >= this.sentences.length) return this._onChapterEnd();
         const s = this.sentences[this.idx];
         const hash = await sentenceHash(s + '|' + this.key);
         const rec = await Storage.audio.get(this.chapter.id, hash, this.key);
@@ -950,9 +1165,42 @@
         document.querySelectorAll('.sent.playing').forEach(x => x.classList.remove('playing'));
         const sentEl = document.querySelector(`.sent[data-sent="${this.idx}"]`);
         if (sentEl) { sentEl.classList.add('playing'); sentEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        this.progressCb?.(this.idx, this.sentences.length);
         await this.audioEl.play();
       },
+      // Sentence just finished — decide next action based on loopMode.
+      _onSentenceEnd() {
+        if (this.loopMode === 'sentence') {
+          // Repeat current
+          this._play().catch(err => { console.error('[Player]', err); this.stop(); });
+          return;
+        }
+        if (this.loopMode === 'paragraph') {
+          const curPara = this.sentenceParaIdx[this.idx];
+          const nextIdx = this.idx + 1;
+          if (nextIdx >= this.sentences.length || this.sentenceParaIdx[nextIdx] !== curPara) {
+            // We just finished the last sentence of this paragraph — jump back to first sentence of same paragraph
+            let firstOfPara = this.idx;
+            while (firstOfPara > 0 && this.sentenceParaIdx[firstOfPara - 1] === curPara) firstOfPara--;
+            this.idx = firstOfPara;
+            this._play().catch(err => { console.error('[Player]', err); this.stop(); });
+            return;
+          }
+          // Otherwise fall through to normal next
+        }
+        this._next();
+      },
       _next() { this.idx++; this._savePos(); this._play().catch(err => { console.error('[Player]', err); this.stop(); }); },
+      // End of chapter reached — handle continuous cross-chapter flow.
+      async _onChapterEnd() {
+        const cb = this.chapterEndCb;
+        this.stop();
+        if (cb && this.continuous !== false) {
+          try { await cb(); } catch (err) { console.warn('[Player] chapterEndCb failed', err); }
+        }
+      },
+      setLoopMode(mode) { this.loopMode = mode; },
+      setContinuous(b) { this.continuous = b; },
       _highlightWord() {
         if (!this.audioEl) return;   // guard: stop() may have nulled audioEl mid-fire
         const t = this.audioEl.currentTime;
@@ -990,7 +1238,8 @@
         if (this.saveTimer) { clearInterval(this.saveTimer); this.saveTimer = null; }
         if (this.audioEl) { this.audioEl.pause(); if (this.audioEl.src) { URL.revokeObjectURL(this.audioEl.src); } this.audioEl = null; }
         document.querySelectorAll('.sent.playing, .wnow').forEach(x => x.classList.remove('playing', 'wnow'));
-        this.chapter = null; this.book = null; this.sentences = []; this.timings = []; this.idx = 0; this.key = null;
+        this.chapter = null; this.book = null; this.sentences = []; this.sentenceParaIdx = []; this.timings = []; this.idx = 0; this.key = null; this.targetLang = null; this.level = null;
+        // NOTE: preserve loopMode + continuous + speed + callbacks — they're user-session preferences
         // Also nuke any orphan ephemeral audio so the ⏹ button truly stops EVERYTHING
         if (typeof EphemeralAudio !== 'undefined') EphemeralAudio.stop();
       },
@@ -1234,6 +1483,15 @@
         return out;
       };
 
+      const glossary = book.glossary || [];
+      // Gather bookmarks across all chapters for this book
+      const allBookmarks = [];
+      for (const c of chs) {
+        for (const bm of (c.bookmarks || [])) {
+          allBookmarks.push({ chapterId: c.id, chapterTitle: c.title, chapterIdx: c.index, ...bm });
+        }
+      }
+
       const renderView = () => `
         <header class="topbar">
           <button id="btn-back-library">&#8592;</button>
@@ -1245,8 +1503,41 @@
         </header>
         <main class="book-detail">
           <ol class="chapters">
-            ${chs.map(c => `<li data-cid="${escapeHtml(c.id)}"><span class="ch-idx">${c.index + 1}</span><span class="ch-title">${escapeHtml(c.title)}</span><span class="chips">${chipsFor(c).map(x => `<span class="chip">${x}</span>`).join('')}</span></li>`).join('')}
+            ${chs.map(c => `<li data-cid="${escapeHtml(c.id)}" class="chapter-row">
+              <span class="ch-idx">${c.index + 1}</span>
+              <span class="ch-title" contenteditable="false">${escapeHtml(c.title)}</span>
+              <span class="chips">${chipsFor(c).map(x => `<span class="chip">${x}</span>`).join('')}</span>
+              <span class="ch-actions">
+                <button class="ch-rename" data-cid="${escapeHtml(c.id)}" title="Rename chapter">&#9998;</button>
+                <button class="ch-delete" data-cid="${escapeHtml(c.id)}" title="Delete chapter">&#128465;</button>
+              </span>
+            </li>`).join('')}
           </ol>
+          ${allBookmarks.length ? `
+            <div class="glossary-editor">
+              <h3>Bookmarks (${allBookmarks.length})</h3>
+              <ul class="bookmarks-list">
+                ${allBookmarks.map(bm => `<li data-cid="${escapeHtml(bm.chapterId)}" data-sidx="${bm.sentIdx}">
+                  <b>Ch ${bm.chapterIdx + 1}</b> · <i>${escapeHtml(bm.snippet || '')}</i>
+                  <span style="float:right; opacity:0.5">${new Date(bm.addedAt).toLocaleDateString()}</span>
+                </li>`).join('')}
+              </ul>
+            </div>` : ''}
+          <div class="glossary-editor">
+            <h3>Per-book glossary (${glossary.length})</h3>
+            <p><small>Terms enforced across every LLM call (translation, gloss, breakdown). Fixes Buddhist-term drift.</small></p>
+            <div id="glossary-rows">
+              ${glossary.map((g, i) => `
+                <div class="glossary-list" data-idx="${i}">
+                  <input class="g-term" value="${escapeHtml(g.term || '')}" placeholder="${escapeHtml(book.sourceLang.toUpperCase())} term">
+                  <input class="g-trans" value="${escapeHtml(g.translation || '')}" placeholder="Target-lang equivalent">
+                  <button class="del-term" data-idx="${i}">&#10005;</button>
+                </div>`).join('')}
+            </div>
+            <button id="btn-add-term" class="secondary">+ Add term</button>
+            <button id="btn-save-glossary" class="cta-generate">Save glossary</button>
+            <div id="glossary-status" style="margin-top:6px; font-size:0.85rem; color:var(--fg-muted);"></div>
+          </div>
         </main>`;
 
       const renderEdit = () => `
@@ -1270,14 +1561,113 @@
 
       const wireCommon = () => {
         el.querySelector('#btn-back-library').addEventListener('click', () => nav('library'));
+        // Chapter click → open reader, BUT ignore clicks on the per-chapter actions bar
         el.querySelectorAll('li[data-cid]').forEach(li =>
-          li.addEventListener('click', () => nav('reader', { chapterId: li.dataset.cid }))
+          li.addEventListener('click', (ev) => {
+            if (ev.target.closest('.ch-actions') || ev.target.closest('.ch-title[contenteditable="true"]')) return;
+            nav('reader', { chapterId: li.dataset.cid });
+          })
         );
+      };
+
+      const wireViewOnly = () => {
+        // Per-chapter delete
+        el.querySelectorAll('.ch-delete').forEach(btn => btn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          const cid = btn.dataset.cid;
+          const c = chs.find(x => x.id === cid);
+          if (!c) return;
+          if (!confirm(`Delete chapter "${c.title}"? Its translations + audio + bookmarks are removed. Vocab stays. Cannot be undone.`)) return;
+          await Storage.chapters.delete(cid);
+          // Purge audio blobs for this chapter
+          try {
+            const lru = (await LF_AUDIO.getItem('__lru__')) || [];
+            const keep = [];
+            for (const entry of lru) {
+              if (entry.key.startsWith(cid + ':')) await LF_AUDIO.removeItem(entry.key);
+              else keep.push(entry);
+            }
+            await LF_AUDIO.setItem('__lru__', keep);
+          } catch {}
+          // Reload book detail
+          nav('book', { id });
+        }));
+        // Per-chapter inline rename
+        el.querySelectorAll('.ch-rename').forEach(btn => btn.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          const cid = btn.dataset.cid;
+          const li = el.querySelector(`li[data-cid="${cid}"]`);
+          const titleSpan = li?.querySelector('.ch-title');
+          if (!titleSpan) return;
+          titleSpan.setAttribute('contenteditable', 'true');
+          titleSpan.focus();
+          // Select all text
+          const range = document.createRange();
+          range.selectNodeContents(titleSpan);
+          const sel = window.getSelection();
+          sel.removeAllRanges(); sel.addRange(range);
+          const commit = async () => {
+            const newTitle = titleSpan.textContent.trim();
+            titleSpan.setAttribute('contenteditable', 'false');
+            titleSpan.removeEventListener('keydown', keyH);
+            titleSpan.removeEventListener('blur', commit);
+            if (newTitle && newTitle !== chs.find(c => c.id === cid).title) {
+              const stored = await Storage.chapters.get(cid);
+              stored.title = newTitle;
+              await Storage.chapters.put({ ...stored, sourceText: stored.sourceText });
+            } else {
+              titleSpan.textContent = chs.find(c => c.id === cid).title;
+            }
+          };
+          const keyH = (ev) => {
+            if (ev.key === 'Enter') { ev.preventDefault(); titleSpan.blur(); }
+            if (ev.key === 'Escape') { titleSpan.textContent = chs.find(c => c.id === cid).title; titleSpan.blur(); }
+          };
+          titleSpan.addEventListener('keydown', keyH);
+          titleSpan.addEventListener('blur', commit);
+        }));
+        // Bookmark item click → open reader at that sentence
+        el.querySelectorAll('.bookmarks-list li').forEach(li => li.addEventListener('click', () => {
+          nav('reader', { chapterId: li.dataset.cid });
+          // Note: reader route doesn't currently accept a sentIdx to auto-scroll — leaving that as gentle nav.
+        }));
+        // Glossary editor
+        const rows = el.querySelector('#glossary-rows');
+        el.querySelector('#btn-add-term')?.addEventListener('click', () => {
+          const idx = rows.children.length;
+          const div = document.createElement('div');
+          div.className = 'glossary-list';
+          div.dataset.idx = idx;
+          div.innerHTML = `
+            <input class="g-term" placeholder="${escapeHtml(book.sourceLang.toUpperCase())} term">
+            <input class="g-trans" placeholder="Target-lang equivalent">
+            <button class="del-term" data-idx="${idx}">&#10005;</button>`;
+          rows.appendChild(div);
+          div.querySelector('.del-term').addEventListener('click', () => div.remove());
+          div.querySelector('.g-term').focus();
+        });
+        rows.querySelectorAll('.del-term').forEach(btn => btn.addEventListener('click', (ev) => {
+          ev.target.closest('.glossary-list').remove();
+        }));
+        el.querySelector('#btn-save-glossary')?.addEventListener('click', async () => {
+          const status = el.querySelector('#glossary-status');
+          const newGloss = [];
+          rows.querySelectorAll('.glossary-list').forEach(row => {
+            const t = row.querySelector('.g-term').value.trim();
+            const tr = row.querySelector('.g-trans').value.trim();
+            if (t && tr) newGloss.push({ term: t, translation: tr });
+          });
+          book.glossary = newGloss;
+          await Storage.books.put(book);
+          status.textContent = `Saved ${newGloss.length} terms.`;
+          setTimeout(() => { status.textContent = ''; }, 2500);
+        });
       };
 
       const showView = () => {
         el.innerHTML = renderView();
         wireCommon();
+        wireViewOnly();
         el.querySelector('#btn-edit-book').addEventListener('click', showEdit);
       };
       const showEdit = () => {
@@ -1393,7 +1783,7 @@
       return `<span class="sent" data-sent="${i}">${wrapped}</span>`;
     }
 
-    route('reader', async (el, { chapterId }) => {
+    route('reader', async (el, { chapterId, autoplay }) => {
       const readerAbort = new AbortController();
       _currentRouteAbort = readerAbort;
 
@@ -1441,10 +1831,44 @@
                   <p class="hint"><small>Paragraph-by-paragraph LLM translation from ${escapeHtml(LANG_NAMES[book.sourceLang] || book.sourceLang)}. Saves incrementally to your browser (IndexedDB). Resumable on errors. Once generated, re-reading costs zero. Swap freely between any generated language via the ${['RU','EN','ES','PT'].join(' / ')} pills above.</small></p>`}
            </div>`;
 
+      // Find prev/next chapter for chapter-nav buttons
+      const allChs = await Storage.chapters.list(book.id);
+      const chPos = allChs.findIndex(c => c.id === chapterId);
+      const prevCh = chPos > 0 ? allChs[chPos - 1] : null;
+      const nextCh = chPos >= 0 && chPos < allChs.length - 1 ? allChs[chPos + 1] : null;
+
+      // Load user prefs for loop + continuous
+      const loopMode = await Storage.settings.get('loopMode', 'off');
+      const continuous = await Storage.settings.get('continuous', false);
+      Player.setLoopMode(loopMode);
+      Player.setContinuous(continuous);
+      const showNums = window.__prefsShowNums || await Storage.settings.get('setting:showSentenceNumbers', false);
+
+      // Compute which sentence indices are bookmarked in this chapter
+      const bookmarks = ch.bookmarks || [];
+      const bmSet = new Set(bookmarks.map(b => b.sentIdx));
+
+      // Re-render paragraphs with bookmark class applied
+      const paragraphsHtmlWithBookmarks = body
+        ? (() => {
+            let idx = 0;
+            return splitParagraphs(body).map(p =>
+              `<p>${splitSentences(p).map(s => {
+                const cls = bmSet.has(idx) ? 'sent bookmarked' : 'sent';
+                const rendered = `<span class="${cls}" data-sent="${idx}">${s.split(/(\s+)/).map(part => /^\s+$/.test(part) ? part : `<span class="w">${escapeHtml(part)}</span>`).join('')}</span>`;
+                idx++;
+                return rendered;
+              }).join(' ')}</p>`
+            ).join('');
+          })()
+        : paragraphsHtml;
+
       el.innerHTML = `
         <header class="topbar reader-topbar">
-          <button id="btn-back-book">&#8592;</button>
+          <button id="btn-back-book" title="Back to book">&#8592;</button>
+          <button class="pc-btn prev-ch-btn" title="Previous chapter" ${prevCh ? '' : 'disabled'}>&laquo;</button>
           <div class="crumbs">${escapeHtml(book.title)} &middot; ${escapeHtml(ch.title)}</div>
+          <button class="pc-btn next-ch-btn" title="Next chapter" ${nextCh ? '' : 'disabled'}>&raquo;</button>
           <div class="pills lang-pills">
             ${['ru','en','es','pt'].map(l => `<button data-lang="${l}" class="pill${l === displayLang ? ' active' : ''}${langHasContent[l] ? ' has-content' : ''}" title="${langHasContent[l] ? 'Has translated text' : (l === book.sourceLang ? 'Source language' : 'Not translated yet — click to generate')}">${l.toUpperCase()}${langHasContent[l] ? '<span class="pill-dot">&bull;</span>' : ''}</button>`).join('')}
           </div>
@@ -1452,10 +1876,12 @@
             ${['A2','B1','B2','C1'].map(lv => `<button data-level="${lv}" class="pill${lv === level ? ' active' : ''}">${lv}</button>`).join('')}
           </div>
           <div class="player-controls">
-            <button class="pc-btn prev-btn" title="Previous sentence">&#9198;</button>
-            <button class="pc-btn play-btn" title="Play">&#9654;</button>
-            <button class="pc-btn stop-btn" title="Stop">&#9724;</button>
-            <button class="pc-btn next-btn" title="Next sentence">&#9197;</button>
+            <button class="pc-btn prev-btn" title="Previous sentence (J or ←)">&#9198;</button>
+            <button class="pc-btn play-btn" title="Play / Pause (Space)">&#9654;</button>
+            <button class="pc-btn stop-btn" title="Stop (Esc)">&#9724;</button>
+            <button class="pc-btn next-btn" title="Next sentence (K or →)">&#9197;</button>
+            <button class="pc-btn loop-btn ${loopMode === 'sentence' ? 'loop-sent' : loopMode === 'paragraph' ? 'loop-para' : ''}" title="Loop mode (L to cycle): off/sentence/paragraph">${loopMode === 'sentence' ? '&#128257;s' : loopMode === 'paragraph' ? '&#128257;p' : '&#128256;'}</button>
+            <button class="pc-btn continuous-btn ${continuous ? 'active-toggle' : ''}" title="Continuous cross-chapter play">${continuous ? '&#10148;&#10148;' : '&#10148;'}</button>
             <select class="speed" title="Playback speed">
               <option value="0.75">0.75&times;</option>
               <option value="1" selected>1&times;</option>
@@ -1464,7 +1890,8 @@
             </select>
           </div>
         </header>
-        <main class="reader">${paragraphsHtml}<div id="popover" hidden></div></main>`;
+        <div class="reader-progress"><div class="reader-progress-fill" id="reader-progress-fill"></div></div>
+        <main class="reader ${showNums ? 'show-sent-nums' : ''}">${paragraphsHtmlWithBookmarks}<div id="popover" hidden></div></main>`;
 
       el.querySelector('#btn-back-book').addEventListener('click', () => nav('book', { id: book.id }));
       el.querySelectorAll('.lang-pills .pill').forEach(p => p.addEventListener('click', async () => {
@@ -1476,8 +1903,18 @@
         nav('reader', { chapterId });
       }));
 
-      // Generate button — works for ANY non-source target language
+      // Generate button — works for ANY non-source target language, with cost preview
       document.getElementById('btn-generate')?.addEventListener('click', async (e) => {
+        const source = ch.sourceText || ch.versions?.[book.sourceLang] || '';
+        const cost = estimateTranslateCost(source);
+        const bodyHtml = `Translate this chapter to <b>${escapeHtml(langLabelFull)}</b>?<br><br>
+          Chapter length: <b>${cost.chars.toLocaleString()} chars</b><br>
+          Estimated input tokens: ~${cost.inputToks.toLocaleString()}<br>
+          Estimated output tokens: ~${cost.outputToks.toLocaleString()}<br>
+          Estimated LLM cost: <b>~$${cost.usd.toFixed(3)}</b> (Sonnet 4.6)<br><br>
+          <small>Saves incrementally, resumable on errors. Once done, re-reading is free.</small>`;
+        const ok = await confirmCost(`Generate ${langLabelFull}?`, bodyHtml, `Generate (~$${cost.usd.toFixed(3)})`);
+        if (!ok) return;
         e.target.disabled = true;
         const prog = document.getElementById('gen-progress');
         try {
@@ -1501,6 +1938,14 @@
         voiceBtn.className = 'voice-btn';
         el.querySelector('.reader-topbar').appendChild(voiceBtn);
         voiceBtn.addEventListener('click', async () => {
+          const cost = estimateVoiceCost(body || '');
+          const bodyHtml = `Voice this chapter in <b>${escapeHtml(langLabelFull)}</b>?<br><br>
+            Chapter length: <b>${cost.chars.toLocaleString()} chars</b><br>
+            Estimated ElevenLabs credits: <b>~${cost.credits.toLocaleString()}</b><br>
+            Estimated cost (Creator tier): <b>~$${cost.usdApprox.toFixed(2)}</b><br><br>
+            <small>One-time cost. Audio + word timings cached locally forever.</small>`;
+          const ok = await confirmCost(`Voice this chapter?`, bodyHtml, `Voice (~$${cost.usdApprox.toFixed(2)})`);
+          if (!ok) return;
           voiceBtn.disabled = true;
           voiceBtn.textContent = 'Voicing…';
           try {
@@ -1553,10 +1998,100 @@
         }
         syncPlayBtn();
       });
-      stopBtn.addEventListener('click', () => { Player.stop(); playBtn.innerHTML = '&#9654;'; });
+      stopBtn.addEventListener('click', () => { Player.stop(); playBtn.innerHTML = '&#9654;'; updateProgress(0, 1); });
 
       el.querySelector('.speed').value = Player.speed;
       el.querySelector('.speed').addEventListener('change', (e) => Player.setSpeed(parseFloat(e.target.value)));
+
+      // ---- Progress bar ----
+      const progressFill = el.querySelector('#reader-progress-fill');
+      function updateProgress(idx, total) {
+        if (!progressFill) return;
+        const pct = total ? (idx / total) * 100 : 0;
+        progressFill.style.width = pct.toFixed(1) + '%';
+      }
+      // Initial: use chapter positionFraction
+      updateProgress(ch.positionFraction || 0, 1);
+      Player.progressCb = (idx, total) => updateProgress(idx, total);
+
+      // ---- Loop button (cycles off → sentence → paragraph → off) ----
+      const loopBtn = el.querySelector('.loop-btn');
+      loopBtn.addEventListener('click', async () => {
+        const cycle = { off: 'sentence', sentence: 'paragraph', paragraph: 'off' };
+        const newMode = cycle[Player.loopMode] || 'off';
+        Player.setLoopMode(newMode);
+        await Storage.settings.set('loopMode', newMode);
+        loopBtn.classList.remove('loop-sent', 'loop-para');
+        if (newMode === 'sentence') { loopBtn.classList.add('loop-sent'); loopBtn.innerHTML = '&#128257;s'; }
+        else if (newMode === 'paragraph') { loopBtn.classList.add('loop-para'); loopBtn.innerHTML = '&#128257;p'; }
+        else { loopBtn.innerHTML = '&#128256;'; }
+      });
+
+      // ---- Continuous cross-chapter toggle ----
+      const contBtn = el.querySelector('.continuous-btn');
+      contBtn.addEventListener('click', async () => {
+        const newVal = !Player.continuous;
+        Player.setContinuous(newVal);
+        await Storage.settings.set('continuous', newVal);
+        contBtn.classList.toggle('active-toggle', newVal);
+        contBtn.innerHTML = newVal ? '&#10148;&#10148;' : '&#10148;';
+      });
+
+      // ---- Chapter navigation buttons ----
+      const prevChBtn = el.querySelector('.prev-ch-btn');
+      const nextChBtn = el.querySelector('.next-ch-btn');
+      prevChBtn.addEventListener('click', () => {
+        if (prevCh) nav('reader', { chapterId: prevCh.id });
+      });
+      nextChBtn.addEventListener('click', () => {
+        if (nextCh) nav('reader', { chapterId: nextCh.id });
+      });
+
+      // ---- Continuous cross-chapter auto-advance ----
+      // When Player finishes the last sentence AND continuous=true, jump to next chapter and resume RWL there.
+      Player.chapterEndCb = async () => {
+        if (!Player.continuous) return;
+        if (!nextCh) return;
+        // Save current chapter position as fully-read (positionFraction = 1)
+        try {
+          const stored = await Storage.chapters.get(chapterId);
+          if (stored) {
+            stored.positionFraction = 1;
+            await Storage.chapters.put({ ...stored, sourceText: stored.sourceText });
+          }
+        } catch {}
+        // Navigate — the new reader render will pick up Player state
+        nav('reader', { chapterId: nextCh.id, autoplay: true });
+      };
+
+      // If we got here via autoplay from previous chapter, kick off playback automatically.
+      if (autoplay && isVoiced) {
+        setTimeout(() => {
+          Player.start(ch, book, displayLang, level, 0);
+          syncPlayBtn();
+        }, 300);
+      }
+
+      // ---- Keyboard shortcuts ----
+      // Space: toggle play/pause · J: next · K: prev · L: cycle loop mode · Esc: stop · [ / ]: prev/next chapter
+      // Arrow keys also supported (← prev, → next). Ignored when focus is in an input.
+      const keyHandler = (ev) => {
+        const target = ev.target;
+        const inField = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
+        if (inField) return;
+        if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+        switch (ev.key) {
+          case ' ': ev.preventDefault(); playBtn.click(); break;
+          case 'j': case 'J': case 'ArrowRight': ev.preventDefault(); nextBtn.click(); break;
+          case 'k': case 'K': case 'ArrowLeft': ev.preventDefault(); prevBtn.click(); break;
+          case 'l': case 'L': ev.preventDefault(); loopBtn.click(); break;
+          case 'Escape': ev.preventDefault(); stopBtn.click(); break;
+          case '[': ev.preventDefault(); prevChBtn.click(); break;
+          case ']': ev.preventDefault(); nextChBtn.click(); break;
+          default: return;
+        }
+      };
+      document.addEventListener('keydown', keyHandler, { signal: readerAbort.signal });
 
       // ---- Alt+click on a sentence plays RWL from that sentence ----
       el.querySelector('main.reader').addEventListener('click', (e) => {
@@ -1677,6 +2212,7 @@
               ${isVoiced ? '' : '<p class="pop-hint"><small>Voice this chapter to enable ▶ from-here jumps.</small></p>'}
               <div class="pop-actions">
                 <button id="pop-save">+ save</button>
+                <button id="pop-bookmark" title="Bookmark this sentence — appears in book detail bookmarks list">${bmSet.has(sentIdx) ? '&#128278;' : '&#128279;'}</button>
                 <button id="pop-close">✕</button>
               </div>`;
             document.getElementById('pop-save').addEventListener('click', async () => {
@@ -1687,6 +2223,26 @@
               if (!pop.hidden) {
                 const btn = document.getElementById('pop-save');
                 if (btn) btn.textContent = '✓ saved';
+              }
+            });
+            document.getElementById('pop-bookmark').addEventListener('click', async () => {
+              // Toggle bookmark
+              const stored = await Storage.chapters.get(ch.id);
+              stored.bookmarks = stored.bookmarks || [];
+              const existing = stored.bookmarks.findIndex(b => b.sentIdx === sentIdx);
+              if (existing >= 0) {
+                stored.bookmarks.splice(existing, 1);
+                bmSet.delete(sentIdx);
+                sent.classList.remove('bookmarked');
+              } else {
+                stored.bookmarks.push({ sentIdx, addedAt: Date.now(), snippet: sentence.slice(0, 80) });
+                bmSet.add(sentIdx);
+                sent.classList.add('bookmarked');
+              }
+              await Storage.chapters.put({ ...stored, sourceText: stored.sourceText });
+              if (!pop.hidden) {
+                const btn = document.getElementById('pop-bookmark');
+                if (btn) btn.innerHTML = bmSet.has(sentIdx) ? '&#128278;' : '&#128279;';
               }
             });
             document.getElementById('pop-play-word').addEventListener('click', () => {
@@ -1766,22 +2322,41 @@
       const books = await Storage.books.list();
       const all = await Storage.vocab.list();
       const filterId = await Storage.settings.get('vocabFilter', '');
-      const shown = filterId ? all.filter(v => v.bookId === filterId) : all;
-      const emptyRow = shown.length === 0
-        ? '<tr><td colspan="6"><em>No vocab saved yet.</em></td></tr>'
+      const savedSearch = await Storage.settings.get('vocabSearch', '');
+      const applyFilter = (q) => {
+        let list = filterId ? all.filter(v => v.bookId === filterId) : all;
+        if (q) {
+          const qq = q.toLowerCase();
+          list = list.filter(v =>
+            (v.word || '').toLowerCase().includes(qq) ||
+            (v.lemma || '').toLowerCase().includes(qq) ||
+            (v.gloss || '').toLowerCase().includes(qq) ||
+            (v.note || '').toLowerCase().includes(qq) ||
+            (v.sourceSentence || '').toLowerCase().includes(qq)
+          );
+        }
+        return list;
+      };
+      const renderRows = (shown) => shown.length === 0
+        ? '<tr><td colspan="7"><em>No vocab matches.</em></td></tr>'
         : shown.map(v => {
             const bookTitle = books.find(b => b.id === v.bookId)?.title || '';
             return `<tr data-id="${escapeHtml(v.id)}">
-              <td><b>${escapeHtml(v.word)}</b></td>
-              <td>${escapeHtml(v.lemma || '')}</td>
-              <td>${escapeHtml(v.gloss)}</td>
+              <td><b class="editable" data-field="word" contenteditable="false">${escapeHtml(v.word)}</b></td>
+              <td class="editable" data-field="lemma" contenteditable="false">${escapeHtml(v.lemma || '')}</td>
+              <td class="editable" data-field="gloss" contenteditable="false">${escapeHtml(v.gloss || '')}</td>
+              <td class="editable" data-field="note" contenteditable="false">${escapeHtml(v.note || '')}</td>
               <td class="src">${escapeHtml(v.sourceSentence)}</td>
               <td>${escapeHtml(bookTitle)}</td>
-              <td><button class="del">&#10005;</button></td>
+              <td>
+                <button class="edit" title="Edit inline">&#9998;</button>
+                <button class="del" title="Delete">&#10005;</button>
+              </td>
             </tr>`;
           }).join('');
+      const shownInitial = applyFilter(savedSearch);
       el.innerHTML = `
-        <header class="topbar"><button onclick="nav('library')">&#8592;</button><h1>Vocab (${shown.length})</h1>
+        <header class="topbar"><button onclick="nav('library')">&#8592;</button><h1>Vocab (<span id="vocab-count">${shownInitial.length}</span>)</h1>
           <select id="vf">
             <option value="">All books</option>
             ${books.map(b => `<option value="${escapeHtml(b.id)}" ${b.id===filterId?'selected':''}>${escapeHtml(b.title)}</option>`).join('')}
@@ -1789,20 +2364,67 @@
           <button id="vx">Export TSV &rarr; clipboard</button>
         </header>
         <main class="vocab-list">
+          <div class="search-row">
+            <input class="search-input" id="vocab-search" placeholder="Search word / lemma / gloss / note / sentence…" value="${escapeHtml(savedSearch)}">
+          </div>
           <table>
-            <thead><tr><th>Word</th><th>Lemma</th><th>Gloss</th><th>Source sentence</th><th>Book</th><th></th></tr></thead>
-            <tbody>${emptyRow}</tbody>
+            <thead><tr><th>Word</th><th>Lemma</th><th>Gloss</th><th>Note</th><th>Source sentence</th><th>Book</th><th></th></tr></thead>
+            <tbody id="vocab-tbody">${renderRows(shownInitial)}</tbody>
           </table>
         </main>`;
+      const tbody = el.querySelector('#vocab-tbody');
+      const searchInp = el.querySelector('#vocab-search');
+      const countLbl = el.querySelector('#vocab-count');
+      const wireRowActions = () => {
+        el.querySelectorAll('tr[data-id] .del').forEach(btn => btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const row = e.target.closest('tr');
+          const id = row.dataset.id;
+          const v = all.find(x => x.id === id);
+          if (v) { await Storage.vocab.delete(v.word, v.bookId); nav('vocab'); }
+        }));
+        el.querySelectorAll('tr[data-id] .edit').forEach(btn => btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const row = e.target.closest('tr');
+          const editing = row.classList.toggle('editing');
+          row.querySelectorAll('.editable').forEach(td => {
+            td.setAttribute('contenteditable', editing ? 'true' : 'false');
+          });
+          if (editing) row.querySelector('.editable[data-field="word"]').focus();
+          else {
+            // Persist changes
+            const id = row.dataset.id;
+            const v = all.find(x => x.id === id);
+            if (v) {
+              v.word = row.querySelector('.editable[data-field="word"]').textContent.trim();
+              v.lemma = row.querySelector('.editable[data-field="lemma"]').textContent.trim();
+              v.gloss = row.querySelector('.editable[data-field="gloss"]').textContent.trim();
+              v.note = row.querySelector('.editable[data-field="note"]').textContent.trim();
+              await Storage.vocab.put(v);
+            }
+          }
+        }));
+      };
+      wireRowActions();
+      const rerender = async () => {
+        const q = searchInp.value;
+        await Storage.settings.set('vocabSearch', q);
+        const shown = applyFilter(q);
+        tbody.innerHTML = renderRows(shown);
+        countLbl.textContent = shown.length;
+        wireRowActions();
+      };
+      searchInp.addEventListener('input', rerender);
       document.getElementById('vf').addEventListener('change', async (e) => {
         await Storage.settings.set('vocabFilter', e.target.value);
         nav('vocab');
       });
       document.getElementById('vx').addEventListener('click', async () => {
+        const shown = applyFilter(searchInp.value);
         const tsv = shown.map(v => {
           const book = books.find(b => b.id === v.bookId);
           const ch = v.chapterId;
-          return [v.word, v.gloss, v.sourceSentence.replace(/[\t\r\n]/g, ' '), book?.title || '', ch || ''].join('\t');
+          return [v.word, v.gloss, (v.sourceSentence || '').replace(/[\t\r\n]/g, ' '), book?.title || '', ch || ''].join('\t');
         }).join('\n');
         try {
           await navigator.clipboard.writeText(tsv);
@@ -1810,50 +2432,230 @@
         } catch (err) {
           document.getElementById('vx').textContent = 'Clipboard denied — select & copy manually';
         }
-        setTimeout(() => nav('vocab'), 1500);
+        setTimeout(() => { document.getElementById('vx').textContent = 'Export TSV → clipboard'; }, 1500);
       });
-      el.querySelectorAll('tr[data-id] .del').forEach(btn => btn.addEventListener('click', async (e) => {
-        const row = e.target.closest('tr');
-        const id = row.dataset.id;
-        const v = all.find(x => x.id === id);
-        if (v) { await Storage.vocab.delete(v.word, v.bookId); nav('vocab'); }
-      }));
     });
     route('settings', async (el) => {
       const health = await fetch('/api/health').then(r => r.json()).catch(() => ({}));
       const stats = await Storage.audio.stats();
       const est = navigator.storage?.estimate ? await navigator.storage.estimate() : null;
       const books = await Storage.books.list();
+      const curTheme = await LF_META.getItem('setting:theme') || 'auto';
+      const curFontSize = await LF_META.getItem('setting:readerFontSize') || 1.05;
+      const curLineHeight = await LF_META.getItem('setting:readerLineHeight') || 1.75;
+      const curShowNums = await LF_META.getItem('setting:showSentenceNumbers') || false;
+      const ankiUrl = await LF_META.getItem('setting:ankiConnectUrl') || 'http://localhost:8765';
       el.innerHTML = `
         <header class="topbar"><button onclick="nav('library')">&#8592;</button><h1>Settings</h1></header>
         <main class="settings">
-          <section>
+          <section class="settings-section">
+            <h3>Reading &amp; theme</h3>
+            <div class="settings-row"><label for="s-theme">Theme</label>
+              <select id="s-theme">
+                <option value="auto" ${curTheme==='auto'?'selected':''}>Auto (system)</option>
+                <option value="light" ${curTheme==='light'?'selected':''}>Light</option>
+                <option value="dark" ${curTheme==='dark'?'selected':''}>Dark</option>
+              </select>
+            </div>
+            <div class="settings-row"><label for="s-fontsize">Reader font size (<span id="fs-val">${curFontSize}</span> rem)</label>
+              <input type="range" id="s-fontsize" min="0.85" max="1.6" step="0.05" value="${curFontSize}">
+            </div>
+            <div class="settings-row"><label for="s-lineheight">Line height (<span id="lh-val">${curLineHeight}</span>)</label>
+              <input type="range" id="s-lineheight" min="1.4" max="2.2" step="0.05" value="${curLineHeight}">
+            </div>
+            <div class="settings-row"><label for="s-shownums">Show sentence numbers in margin</label>
+              <input type="checkbox" id="s-shownums" ${curShowNums ? 'checked' : ''}>
+            </div>
+          </section>
+          <section class="settings-section">
             <h3>Backend</h3>
             <ul>
               <li>LLM: ${health.llmConfigured ? '&#10003;' : '&#10007;'}</li>
               <li>TTS: ${health.ttsConfigured ? '&#10003;' : '&#10007;'}</li>
-              <li>Narrator voice: ${health.voices?.narrator ? '&#10003;' : '&#10007; not set'}</li>
+              <li>ES narrator: ${health.voices?.es ? '&#10003;' : '&#10007; not set'}</li>
+              <li>EN narrator: ${health.voices?.en ? '&#10003;' : '&#10007; not set'}</li>
+              <li>RU narrator: ${health.voices?.ru ? '&#10003;' : '&#10007; not set'}</li>
+              <li>PT narrator: ${health.voices?.pt ? '&#10003;' : '&#10007; not set'}</li>
               <li>Kravtsov voice: ${health.voices?.kravtsov ? '&#10003;' : '&#10007; not set'}</li>
             </ul>
           </section>
-          <section>
+          <section class="settings-section">
+            <h3>Backup &amp; restore</h3>
+            <p><small>Downloads a JSON snapshot of all books, chapters, translations, vocab, bookmarks, and audio blobs (base64). Restore rebuilds everything.</small></p>
+            <div class="settings-actions">
+              <button id="btn-backup" class="cta-generate">Download backup</button>
+              <label class="secondary" style="cursor:pointer; padding:6px 12px; border:1px solid var(--border); border-radius:4px; display:inline-block;">
+                Restore from backup
+                <input type="file" id="restore-file" accept=".json" style="display:none">
+              </label>
+            </div>
+            <div id="backup-status" style="margin-top:8px; font-size:0.85rem; color:var(--fg-muted);"></div>
+          </section>
+          <section class="settings-section">
+            <h3>Anki integration</h3>
+            <p><small>Requires <a href="https://ankiweb.net/shared/info/2055492159" target="_blank">AnkiConnect</a> plugin. Push all unexported vocab to Anki with one click.</small></p>
+            <div class="settings-row"><label for="s-ankiurl">AnkiConnect URL</label>
+              <input type="url" id="s-ankiurl" value="${escapeHtml(ankiUrl)}" placeholder="http://localhost:8765">
+            </div>
+            <div class="settings-actions">
+              <button id="btn-anki-test" class="secondary">Test connection</button>
+              <button id="btn-anki-push" class="cta-generate">Push unexported vocab</button>
+            </div>
+            <div id="anki-status" style="margin-top:8px; font-size:0.85rem; color:var(--fg-muted);"></div>
+          </section>
+          <section class="settings-section">
             <h3>Cache</h3>
             <p>Audio: ${stats.count} clips, ${(stats.bytes/1024/1024).toFixed(1)} MB</p>
             ${est ? `<p>Browser storage: ${(est.usage/1024/1024).toFixed(0)} / ${(est.quota/1024/1024).toFixed(0)} MB</p>` : ''}
-            <button id="btn-evict">Evict half the cache</button>
-            <button id="btn-wipe" class="danger">Wipe everything</button>
+            <div class="settings-actions">
+              <button id="btn-evict">Evict half the cache</button>
+              <button id="btn-wipe" class="danger secondary">Wipe everything</button>
+            </div>
           </section>
-          <section>
+          <section class="settings-section">
             <h3>Per-book narrator voice</h3>
             <ul>
               ${books.map(b => `<li>${escapeHtml(b.title)}
                 <select data-book="${escapeHtml(b.id)}" class="voice-sel">
-                  <option value="narrator" ${b.narratorVoice==='narrator'?'selected':''}>Narrator (Spanish)</option>
-                  <option value="kravtsov" ${b.narratorVoice==='kravtsov'?'selected':''}>Kravtsov (cloned)</option>
-                </select></li>`).join('')}
+                  <option value="narrator" ${b.narratorVoice==='narrator'?'selected':''}>Auto by display language</option>
+                  <option value="kravtsov" ${b.narratorVoice==='kravtsov'?'selected':''}>Kravtsov (Marina)</option>
+                </select></li>`).join('') || '<li><i>No books yet</i></li>'}
             </ul>
           </section>
         </main>`;
+
+      // Theme picker
+      el.querySelector('#s-theme').addEventListener('change', async (e) => {
+        await LF_META.setItem('setting:theme', e.target.value);
+        document.documentElement.setAttribute('data-theme', e.target.value);
+      });
+      // Font size slider (live update)
+      const fsSlider = el.querySelector('#s-fontsize');
+      const fsVal = el.querySelector('#fs-val');
+      fsSlider.addEventListener('input', async () => {
+        const v = parseFloat(fsSlider.value);
+        fsVal.textContent = v.toFixed(2);
+        document.documentElement.style.setProperty('--reader-font-size', v + 'rem');
+        await LF_META.setItem('setting:readerFontSize', v);
+      });
+      // Line height slider
+      const lhSlider = el.querySelector('#s-lineheight');
+      const lhVal = el.querySelector('#lh-val');
+      lhSlider.addEventListener('input', async () => {
+        const v = parseFloat(lhSlider.value);
+        lhVal.textContent = v.toFixed(2);
+        document.documentElement.style.setProperty('--reader-line-height', v);
+        await LF_META.setItem('setting:readerLineHeight', v);
+      });
+      // Show sentence numbers
+      el.querySelector('#s-shownums').addEventListener('change', async (e) => {
+        window.__prefsShowNums = e.target.checked;
+        await LF_META.setItem('setting:showSentenceNumbers', e.target.checked);
+      });
+      // AnkiConnect URL
+      el.querySelector('#s-ankiurl').addEventListener('change', async (e) => {
+        await LF_META.setItem('setting:ankiConnectUrl', e.target.value.trim());
+      });
+      // Anki test
+      el.querySelector('#btn-anki-test').addEventListener('click', async () => {
+        const status = el.querySelector('#anki-status');
+        const url = el.querySelector('#s-ankiurl').value.trim();
+        status.textContent = 'Testing…';
+        try {
+          const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'version', version: 6 })
+          });
+          const j = await r.json();
+          if (j.error) status.textContent = 'Error: ' + j.error;
+          else status.textContent = 'Connected. AnkiConnect version ' + j.result;
+        } catch (err) {
+          status.textContent = 'Failed: ' + err.message + ' — is Anki running with AnkiConnect installed?';
+        }
+      });
+      // Anki push all unexported
+      el.querySelector('#btn-anki-push').addEventListener('click', async () => {
+        const status = el.querySelector('#anki-status');
+        const url = el.querySelector('#s-ankiurl').value.trim();
+        const allVocab = await Storage.vocab.list();
+        const unexported = allVocab.filter(v => !v.exported);
+        if (!unexported.length) { status.textContent = 'No unexported vocab to push.'; return; }
+        status.textContent = `Pushing ${unexported.length} cards…`;
+        try {
+          const notes = unexported.map(v => ({
+            deckName: 'lector',
+            modelName: 'Basic',
+            fields: {
+              Front: v.word,
+              Back: `<b>${v.gloss}</b><br><small>${v.sourceSentence}</small>${v.note ? '<br><i>' + v.note + '</i>' : ''}`
+            },
+            tags: ['lector', 'auto']
+          }));
+          // Ensure deck exists
+          await fetch(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'createDeck', version: 6, params: { deck: 'lector' } })
+          });
+          const r = await fetch(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'addNotes', version: 6, params: { notes } })
+          });
+          const j = await r.json();
+          if (j.error) throw new Error(j.error);
+          const succeeded = (j.result || []).filter(x => x != null).length;
+          // Mark them as exported in storage
+          for (let i = 0; i < unexported.length; i++) {
+            if ((j.result || [])[i] != null) {
+              const v = unexported[i];
+              v.exported = true;
+              await Storage.vocab.put(v);
+            }
+          }
+          status.textContent = `Pushed ${succeeded} / ${unexported.length} cards. Deck "lector" in Anki.`;
+        } catch (err) {
+          status.textContent = 'Failed: ' + err.message;
+        }
+      });
+      // Backup
+      el.querySelector('#btn-backup').addEventListener('click', async () => {
+        const status = el.querySelector('#backup-status');
+        status.textContent = 'Building backup…';
+        try {
+          const dump = await exportBackup();
+          const blob = new Blob([JSON.stringify(dump)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          const dt = new Date().toISOString().slice(0, 10);
+          a.href = url;
+          a.download = `lector-backup-${dt}.json`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+          status.textContent = `Downloaded lector-backup-${dt}.json (${dump.books.length} books, ${dump.audio.length} audio blobs)`;
+        } catch (err) {
+          status.textContent = 'Backup failed: ' + err.message;
+        }
+      });
+      // Restore
+      el.querySelector('#restore-file').addEventListener('change', async (e) => {
+        const status = el.querySelector('#backup-status');
+        const f = e.target.files?.[0];
+        if (!f) return;
+        if (!confirm('Restore will WIPE all current data and replace with backup content. Continue?')) return;
+        status.textContent = 'Reading backup…';
+        try {
+          const txt = await f.text();
+          const dump = JSON.parse(txt);
+          status.textContent = 'Restoring…';
+          await importBackup(dump);
+          status.textContent = 'Restored. Go back to Library.';
+        } catch (err) {
+          status.textContent = 'Restore failed: ' + err.message;
+        }
+      });
+      // Existing cache buttons
       document.getElementById('btn-evict').addEventListener('click', async () => {
         const freed = await Storage.audio.evictOldest(stats.bytes / 2);
         alert('Freed ' + (freed/1024/1024).toFixed(1) + ' MB');
@@ -1870,6 +2672,129 @@
         await Storage.books.put(b);
       }));
     });
+
+    // ============ Backup / restore helpers ============
+    // Serialize the entire IndexedDB (meta + text + audio-with-blobs-as-base64) → JSON dump.
+    async function exportBackup() {
+      const dump = { version: 1, ts: Date.now(), books: [], chapters: [], text: {}, vocab: [], settings: {}, audio: [] };
+      const bookIds = (await LF_META.getItem('books:index')) || [];
+      for (const bid of bookIds) {
+        const b = await LF_META.getItem(`book:${bid}`);
+        if (b) dump.books.push(b);
+        const chIdx = (await LF_META.getItem(`chapters:${bid}`)) || [];
+        for (const cid of chIdx) {
+          const ch = await LF_META.getItem(`chapter:${cid}`);
+          if (ch) dump.chapters.push(ch);
+        }
+        dump.text[`chapters:${bid}`] = chIdx;
+      }
+      // Text bodies
+      await LF_TEXT.iterate((val, key) => { dump.text[key] = val; });
+      // Vocab
+      const vIds = (await LF_META.getItem('vocab:index')) || [];
+      for (const vid of vIds) {
+        const v = await LF_META.getItem(`vocab:${vid}`);
+        if (v) dump.vocab.push(v);
+      }
+      // Settings (anything starting with `setting:`)
+      await LF_META.iterate((val, key) => {
+        if (key.startsWith('setting:')) dump.settings[key] = val;
+      });
+      // Audio: convert blob → base64
+      const lru = (await LF_AUDIO.getItem('__lru__')) || [];
+      for (const entry of lru) {
+        const rec = await LF_AUDIO.getItem(entry.key);
+        if (!rec) continue;
+        const b64 = await new Promise((res) => {
+          const fr = new FileReader();
+          fr.onload = () => res(fr.result.split(',')[1] || '');
+          fr.readAsDataURL(rec.blob);
+        });
+        dump.audio.push({ key: entry.key, base64: b64, timings: rec.timings, size: rec.size, ts: rec.ts });
+      }
+      return dump;
+    }
+
+    async function importBackup(dump) {
+      if (!dump || dump.version !== 1) throw new Error('unsupported backup version');
+      // Wipe first
+      await Promise.all([LF_META.clear(), LF_TEXT.clear(), LF_AUDIO.clear()]);
+      // Books + book:index
+      await LF_META.setItem('books:index', dump.books.map(b => b.id));
+      for (const b of dump.books) await LF_META.setItem(`book:${b.id}`, b);
+      // Chapters
+      for (const ch of dump.chapters) await LF_META.setItem(`chapter:${ch.id}`, ch);
+      // Text bodies + chapter indices
+      for (const [key, val] of Object.entries(dump.text)) await LF_TEXT.setItem(key, val);
+      // Restore chapters:${bookId} indices from text if present, or from grouping chapters
+      for (const b of dump.books) {
+        const chIds = dump.chapters.filter(c => c.bookId === b.id).sort((a, c) => a.index - c.index).map(c => c.id);
+        await LF_META.setItem(`chapters:${b.id}`, chIds);
+      }
+      // Vocab
+      const vIds = dump.vocab.map(v => v.id);
+      await LF_META.setItem('vocab:index', vIds);
+      for (const v of dump.vocab) await LF_META.setItem(`vocab:${v.id}`, v);
+      // Settings
+      for (const [key, val] of Object.entries(dump.settings || {})) await LF_META.setItem(key, val);
+      // Audio: decode base64 → blob
+      const lru = [];
+      for (const a of dump.audio || []) {
+        const bin = atob(a.base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: 'audio/mpeg' });
+        await LF_AUDIO.setItem(a.key, { blob, timings: a.timings, size: a.size, ts: a.ts });
+        lru.push({ key: a.key, ts: a.ts, size: a.size });
+      }
+      await LF_AUDIO.setItem('__lru__', lru);
+    }
+    window.exportBackup = exportBackup;
+    window.importBackup = importBackup;
+
+    // ============ Cost estimation helpers ============
+    // Anthropic Sonnet 4.6 pricing (Aug 2026): $3/MTok input, $15/MTok output — approximate for translation.
+    // ElevenLabs Multilingual v2: 1 credit per char (approx cost per credit varies by tier).
+    function estimateTranslateCost(text) {
+      const chars = text.length;
+      const inputToks = Math.ceil(chars / 3.5);
+      const outputToks = Math.ceil(chars / 3.5);   // 1:1 rough
+      const inCostUsd = (inputToks / 1e6) * 3;
+      const outCostUsd = (outputToks / 1e6) * 15;
+      return { chars, inputToks, outputToks, usd: inCostUsd + outCostUsd };
+    }
+    function estimateVoiceCost(text) {
+      const chars = text.length;
+      // Rough: 1 credit per char, ~$0.00018/credit on Creator tier — cost varies wildly by tier.
+      return { chars, credits: chars, usdApprox: chars * 0.00015 };
+    }
+    // Show a confirmation modal with cost estimate before running a costly operation.
+    // Returns Promise<boolean> — true if user confirmed.
+    function confirmCost(title, bodyHtml, actionLabel = 'Continue') {
+      return new Promise((resolve) => {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'modal-backdrop';
+        backdrop.innerHTML = `<div class="modal">
+          <h3>${escapeHtml(title)}</h3>
+          <div class="modal-body">${bodyHtml}</div>
+          <div class="modal-actions">
+            <button class="secondary" data-a="cancel">Cancel</button>
+            <button class="primary" data-a="ok">${escapeHtml(actionLabel)}</button>
+          </div></div>`;
+        document.body.appendChild(backdrop);
+        backdrop.addEventListener('click', (e) => {
+          if (e.target === backdrop) { document.body.removeChild(backdrop); resolve(false); return; }
+          const a = e.target.dataset?.a;
+          if (a === 'cancel' || a === 'ok') {
+            document.body.removeChild(backdrop);
+            resolve(a === 'ok');
+          }
+        });
+      });
+    }
+    window.confirmCost = confirmCost;
+    window.estimateTranslateCost = estimateTranslateCost;
+    window.estimateVoiceCost = estimateVoiceCost;
 
     // ============ Mobile long-press sentence menu ============
     (function() {
