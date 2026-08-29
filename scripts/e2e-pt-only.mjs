@@ -10,6 +10,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = join(__dirname, 'e2e-out');
 mkdirSync(OUT, { recursive: true });
 const BASE = process.env.BASE || 'https://lector-ohmyseas.vercel.app';
+
+async function acceptCostModal(page) {
+  try {
+    await page.waitForSelector('.modal-backdrop .modal-actions .primary', { timeout: 2000 });
+    await page.locator('.modal-backdrop .modal-actions .primary').click({ force: true });
+    await page.waitForTimeout(300);
+  } catch { /* no modal */ }
+}
+
 const TEST_TEXT = `Все явления пусты по своей природе. Сострадание рождается из понимания пустотности.`;
 
 (async () => {
@@ -50,7 +59,7 @@ const TEST_TEXT = `Все явления пусты по своей природ
   console.log('  Generate visible:', genVis);
 
   console.log('\n=== clicking Generate PT ===');
-  await page.locator('#btn-generate').click();
+  await page.locator('#btn-generate').click(); await acceptCostModal(page);
   const t0 = Date.now();
   for (let i = 0; i < 30; i++) {
     const btn = await page.locator('#btn-generate').isVisible().catch(() => false);

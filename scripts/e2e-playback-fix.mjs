@@ -23,6 +23,15 @@ const OUT = join(__dirname, 'e2e-out');
 mkdirSync(OUT, { recursive: true });
 const BASE = process.env.BASE || 'https://lector-ohmyseas.vercel.app';
 
+async function acceptCostModal(page) {
+  try {
+    await page.waitForSelector('.modal-backdrop .modal-actions .primary', { timeout: 2000 });
+    await page.locator('.modal-backdrop .modal-actions .primary').click({ force: true });
+    await page.waitForTimeout(300);
+  } catch { /* no modal */ }
+}
+
+
 // TWO paragraphs so paragraph-tap picks a NEW paragraph
 const TEST_TEXT = `Все явления пусты по своей природе. Сострадание рождается из понимания пустотности.
 
@@ -68,7 +77,7 @@ const shot = async (page, name) => { await page.screenshot({ path: join(OUT, nam
     // Generate ES
     await page.locator('.lang-pills .pill[data-lang="es"]').click();
     await page.waitForTimeout(300);
-    await page.locator('#btn-generate').click();
+    await page.locator('#btn-generate').click(); await acceptCostModal(page);
     for (let i = 0; i < 45; i++) {
       const still = await page.locator('#btn-generate').isVisible().catch(() => false);
       if (!still) break;
@@ -77,7 +86,7 @@ const shot = async (page, name) => { await page.screenshot({ path: join(OUT, nam
     pass('ES generated');
 
     // Voice ES
-    await page.locator('.voice-btn').click();
+    await page.locator('.voice-btn').click(); await acceptCostModal(page);
     for (let i = 0; i < 60; i++) {
       const still = await page.locator('.voice-btn').isVisible().catch(() => false);
       if (!still) break;

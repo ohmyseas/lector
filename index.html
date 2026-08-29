@@ -372,11 +372,10 @@
       font-family: var(--sans); font-size: 0.7rem; color: var(--fg-muted);
       opacity: 0.5; padding-top: 3px;
     }
-    /* Progress bar under topbar */
+    /* Progress bar under topbar (block-level, always visible) */
     .reader-progress {
-      position: sticky; top: 100%; z-index: 8;
       height: 3px; background: var(--border);
-      margin: -3px 0 0;
+      position: sticky; top: 3.5rem; z-index: 8;
     }
     .reader-progress-fill {
       height: 100%; background: var(--accent);
@@ -2007,11 +2006,13 @@
       const progressFill = el.querySelector('#reader-progress-fill');
       function updateProgress(idx, total) {
         if (!progressFill) return;
-        const pct = total ? (idx / total) * 100 : 0;
-        progressFill.style.width = pct.toFixed(1) + '%';
+        // Represent "current position" — sentence idx (0-based) plus 1 divided by total
+        // so first sentence playing shows immediate visible progress (e.g. 1/4 = 25%)
+        const pct = total ? ((idx + 1) / total) * 100 : 0;
+        progressFill.style.width = Math.min(100, pct).toFixed(1) + '%';
       }
-      // Initial: use chapter positionFraction
-      updateProgress(ch.positionFraction || 0, 1);
+      // Initial: use chapter positionFraction (already 0..1)
+      if (progressFill) progressFill.style.width = ((ch.positionFraction || 0) * 100).toFixed(1) + '%';
       Player.progressCb = (idx, total) => updateProgress(idx, total);
 
       // ---- Loop button (cycles off → sentence → paragraph → off) ----

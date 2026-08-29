@@ -12,6 +12,15 @@ const OUT = join(__dirname, 'e2e-out');
 mkdirSync(OUT, { recursive: true });
 const BASE = process.env.BASE || 'https://lector-ohmyseas.vercel.app';
 
+async function acceptCostModal(page) {
+  try {
+    await page.waitForSelector('.modal-backdrop .modal-actions .primary', { timeout: 2000 });
+    await page.locator('.modal-backdrop .modal-actions .primary').click({ force: true });
+    await page.waitForTimeout(300);
+  } catch { /* no modal */ }
+}
+
+
 // TWO paragraphs so we can jump between them
 const TEST_TEXT = `Все явления пусты по своей природе. Сострадание рождается из понимания пустотности.
 
@@ -59,7 +68,7 @@ async function setupBook(page, title = 'Jump test') {
     await page.waitForTimeout(500);
 
     // Voice RU (source lang — no translation needed)
-    await page.locator('.voice-btn').click();
+    await page.locator('.voice-btn').click(); await acceptCostModal(page);
     for (let i = 0; i < 60; i++) {
       const still = await page.locator('.voice-btn').isVisible().catch(() => false);
       if (!still) break;
@@ -171,8 +180,10 @@ async function setupBook(page, title = 'Jump test') {
     if (twoCount === 2) pass('2 book cards after adding second'); else fail('post-add count', `${twoCount}`);
     await shot(page, 'J3-two-books.png');
 
-    // Delete the first one
-    await page.locator('.book-card').first().locator('.book-delete').click();
+    // Delete the "Jump test" book specifically (was voiced) — not "Book to keep"
+    // Library now sorts by title; select the exact card by title match instead of .first()
+    const jumpTestCard = page.locator('.book-card', { has: page.locator('h2', { hasText: 'Jump test' }) });
+    await jumpTestCard.locator('.book-delete').click();
     await page.waitForTimeout(1500);   // give it time for cascade
 
     const afterCount = await page.locator('.book-card').count();

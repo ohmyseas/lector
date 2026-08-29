@@ -22,6 +22,15 @@ const shot = async (page, name) => {
   console.log(`  📸 ${name}`);
 };
 
+// Cost-preview modal appeared with v1.3 — accept it if present within 2s of a Generate/Voice click.
+async function acceptCostModal(page) {
+  try {
+    await page.waitForSelector('.modal-backdrop .modal-actions .primary', { timeout: 2000 });
+    await page.locator('.modal-backdrop .modal-actions .primary').click({ force: true });
+    await page.waitForTimeout(300);
+  } catch { /* no modal — legacy path */ }
+}
+
 const results = { passed: [], failed: [] };
 const pass = (name) => { results.passed.push(name); console.log(`  ✅ ${name}`); };
 const fail = (name, reason) => { results.failed.push({ name, reason }); console.log(`  ❌ ${name}: ${reason}`); };
@@ -80,7 +89,7 @@ async function runFlow(page) {
     if (!genVisible) { fail('Generate button', 'not visible after ES switch'); return; }
     pass('Generate button visible on ES empty state');
 
-    await page.locator('#btn-generate').click();
+    await page.locator('#btn-generate').click(); await acceptCostModal(page);
     const genStart = Date.now();
     let genDone = false;
     for (let i = 0; i < 45; i++) {
@@ -111,7 +120,7 @@ async function runFlow(page) {
     const voiceLabel = await voiceBtn.textContent();
     if (voiceLabel?.includes('ES')) pass('Voice button labeled with (ES B1)'); else fail('Voice ES label', `got '${voiceLabel}'`);
 
-    await voiceBtn.click();
+    await voiceBtn.click(); await acceptCostModal(page);
     const voiceStart = Date.now();
     let voiceDone = false;
     for (let i = 0; i < 60; i++) {
@@ -156,7 +165,7 @@ async function runFlow(page) {
     const ruLabel = await ruVoiceBtn.textContent();
     if (ruLabel?.includes('RU')) pass('Voice button labeled with (RU)'); else fail('Voice RU label', `got '${ruLabel}'`);
 
-    await ruVoiceBtn.click();
+    await ruVoiceBtn.click(); await acceptCostModal(page);
     const ruVoiceStart = Date.now();
     let ruVoiceDone = false;
     for (let i = 0; i < 60; i++) {
@@ -191,7 +200,7 @@ async function runFlow(page) {
     if (!enGenVisible) { fail('EN Generate button', 'not visible on EN empty state'); }
     else {
       pass('EN Generate button visible');
-      await page.locator('#btn-generate').click();
+      await page.locator('#btn-generate').click(); await acceptCostModal(page);
       const enGenStart = Date.now();
       let enGenDone = false;
       for (let i = 0; i < 45; i++) {
@@ -219,7 +228,7 @@ async function runFlow(page) {
         if (await enVoiceBtn.isVisible().catch(() => false)) {
           const enLabel = await enVoiceBtn.textContent();
           if (enLabel?.includes('EN')) pass('Voice button labeled (EN)'); else fail('EN voice label', enLabel);
-          await enVoiceBtn.click();
+          await enVoiceBtn.click(); await acceptCostModal(page);
           const enVoiceStart = Date.now();
           let enVoiceDone = false;
           for (let i = 0; i < 60; i++) {
@@ -256,7 +265,7 @@ async function runFlow(page) {
     if (!ptGenVisible) { fail('PT Generate button', 'not visible on PT empty state'); }
     else {
       pass('PT Generate button visible');
-      await page.locator('#btn-generate').click();
+      await page.locator('#btn-generate').click(); await acceptCostModal(page);
       const ptGenStart = Date.now();
       let ptGenDone = false;
       for (let i = 0; i < 60; i++) {   // 120s cap for PT (safety margin)
@@ -283,7 +292,7 @@ async function runFlow(page) {
         if (await ptVoiceBtn.isVisible().catch(() => false)) {
           const ptLabel = await ptVoiceBtn.textContent();
           if (ptLabel?.includes('PT')) pass('Voice button labeled (PT)');
-          await ptVoiceBtn.click();
+          await ptVoiceBtn.click(); await acceptCostModal(page);
           const ptVoiceStart = Date.now();
           let ptVoiceDone = false;
           for (let i = 0; i < 60; i++) {

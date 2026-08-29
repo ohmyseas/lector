@@ -12,6 +12,15 @@ const OUT = join(__dirname, 'e2e-out');
 mkdirSync(OUT, { recursive: true });
 const BASE = process.env.BASE || 'https://lector-ohmyseas.vercel.app';
 
+async function acceptCostModal(page) {
+  try {
+    await page.waitForSelector('.modal-backdrop .modal-actions .primary', { timeout: 2000 });
+    await page.locator('.modal-backdrop .modal-actions .primary').click({ force: true });
+    await page.waitForTimeout(300);
+  } catch { /* no modal */ }
+}
+
+
 const results = { passed: [], failed: [] };
 const pass = (n) => { results.passed.push(n); console.log(`  ✅ ${n}`); };
 const fail = (n, r) => { results.failed.push({ n, r }); console.log(`  ❌ ${n}: ${r}`); };
