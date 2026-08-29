@@ -382,8 +382,30 @@
       width: 0%; transition: width 0.3s;
     }
     /* Loop mode indicator */
-    .loop-btn.loop-sent { color: var(--accent); border-color: var(--accent); background: var(--accent); color: white; }
-    .loop-btn.loop-para { color: var(--accent); border-color: var(--accent); background: var(--accent-h); color: white; }
+    .loop-btn.loop-sent { border-color: var(--accent); background: var(--accent); color: white; }
+    .loop-btn.loop-para { border-color: var(--accent); background: var(--accent-h); color: white; }
+    /* UX critic #3: active-toggle had no CSS rule → continuous state invisible. Fix: accent color. */
+    .pc-btn.active-toggle { background: var(--accent); color: white; border-color: var(--accent); }
+    /* Shortcuts help tooltip */
+    .kbd-help {
+      position: relative; display: inline-block;
+    }
+    .kbd-help > button {
+      background: transparent; border: 1px solid transparent; color: var(--fg-muted);
+      font-size: 12px; padding: 3px 7px; border-radius: 4px; cursor: help;
+    }
+    .kbd-help > button:hover { background: var(--border); color: var(--fg); }
+    .kbd-help:hover .kbd-panel { display: block; }
+    .kbd-panel {
+      display: none; position: absolute; right: 0; top: 100%;
+      margin-top: 6px; padding: 10px 14px; z-index: 20;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.12);
+      font-family: var(--sans); font-size: 12px; min-width: 220px;
+    }
+    .kbd-panel dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+    .kbd-panel dt { color: var(--fg-muted); }
+    .kbd-panel dt kbd { background: var(--border); color: var(--fg); border-radius: 3px; padding: 1px 5px; font-family: monospace; font-size: 11px; }
     /* Bookmark marker on sentences */
     .sent.bookmarked::after {
       content: '\1F516';
@@ -727,6 +749,12 @@
           return out.sort((a,b) => b.createdAt - a.createdAt);
         },
         async put(entry) {
+          // BUG 5 (code-review round 2): dedup by (word, bookId) for new entries — prevents cross-tab race duplicates.
+          if (!entry.id && entry.word && entry.bookId) {
+            const existing = await Storage.vocab.list({ bookId: entry.bookId });
+            const same = existing.find(v => v.word === entry.word);
+            if (same) { entry.id = same.id; entry.createdAt = same.createdAt; }
+          }
           if (!entry.id) entry.id = uid();
           if (!entry.createdAt) entry.createdAt = Date.now();
           const ids = (await LF_META.getItem('vocab:index')) || [];
@@ -1169,33 +1197,38 @@
       },
       // Sentence just finished — decide next action based on loopMode.
       // BUG #6 (pre-mortem): re-entry guard — some browsers fire 'ended' twice; loop-paragraph could infinite-loop.
+      // BUG A (pre-mortem round 2): reset _handlingEnd in .catch chains too, else Player permanently silenced after a play() error.
       _onSentenceEnd() {
         if (this._handlingEnd) return;
         this._handlingEnd = true;
+        const errH = (err) => { this._handlingEnd = false; console.error('[Player]', err); this.stop(); };
         try {
           if (this.loopMode === 'sentence') {
-            this._play().catch(err => { console.error('[Player]', err); this.stop(); });
+            this._play().catch(errH);
             return;
           }
           if (this.loopMode === 'paragraph') {
             const curPara = this.sentenceParaIdx[this.idx];
             const nextIdx = this.idx + 1;
-            if (nextIdx >= this.sentences.length || this.sentenceParaIdx[nextIdx] !== curPara) {
-              // Last sentence of paragraph — jump back to first sentence of same paragraph
+            // BUG 4 (code-review round 2): at end-of-chapter, if continuous is on, DON'T loop the last paragraph —
+            // fall through to _next() so _onChapterEnd fires and cross-chapter advance kicks in.
+            const atEndOfChapter = nextIdx >= this.sentences.length;
+            if (atEndOfChapter && this.continuous) {
+              // Skip loop-back; go to chapter end
+            } else if (atEndOfChapter || this.sentenceParaIdx[nextIdx] !== curPara) {
               let firstOfPara = this.idx;
               while (firstOfPara > 0 && this.sentenceParaIdx[firstOfPara - 1] === curPara) firstOfPara--;
               this.idx = firstOfPara;
-              this._play().catch(err => { console.error('[Player]', err); this.stop(); });
+              this._play().catch(errH);
               return;
             }
           }
           this._next();
         } finally {
-          // Release guard on the next task so a truly-sequential ended event can be handled.
           setTimeout(() => { this._handlingEnd = false; }, 0);
         }
       },
-      _next() { this.idx++; this._savePos(); this._play().catch(err => { console.error('[Player]', err); this.stop(); }); },
+      _next() { this.idx++; this._savePos(); this._play().catch(err => { this._handlingEnd = false; console.error('[Player]', err); this.stop(); }); },
       // End of chapter reached — handle continuous cross-chapter flow.
       // BUG #2 (code-review): capture cb + null it BEFORE stop() to prevent double-fire on browsers that dispatch 'ended' twice.
       async _onChapterEnd() {
@@ -1247,7 +1280,10 @@
         if (this.audioEl) { this.audioEl.pause(); if (this.audioEl.src) { URL.revokeObjectURL(this.audioEl.src); } this.audioEl = null; }
         document.querySelectorAll('.sent.playing, .wnow').forEach(x => x.classList.remove('playing', 'wnow'));
         this.chapter = null; this.book = null; this.sentences = []; this.sentenceParaIdx = []; this.timings = []; this.idx = 0; this.key = null; this.targetLang = null; this.level = null;
-        // NOTE: preserve loopMode + continuous + speed + callbacks — they're user-session preferences
+        // BUG 3 (code-review round 2): null progressCb + chapterEndCb — they hold DOM references from a torn-down reader.
+        // BUG A follow-up: also reset _handlingEnd so a stopped Player can be started fresh with no stale guard.
+        this.progressCb = null; this.chapterEndCb = null; this._handlingEnd = false;
+        // NOTE: preserve loopMode + continuous + speed — those are user-session preferences.
         // Also nuke any orphan ephemeral audio so the ⏹ button truly stops EVERYTHING
         if (typeof EphemeralAudio !== 'undefined') EphemeralAudio.stop();
       },
@@ -1899,14 +1935,25 @@
             <button class="pc-btn play-btn" title="Play / Pause (Space)">&#9654;</button>
             <button class="pc-btn stop-btn" title="Stop (Esc)">&#9724;</button>
             <button class="pc-btn next-btn" title="Next sentence (K or →)">&#9197;</button>
-            <button class="pc-btn loop-btn ${loopMode === 'sentence' ? 'loop-sent' : loopMode === 'paragraph' ? 'loop-para' : ''}" title="Loop mode (L to cycle): off/sentence/paragraph">${loopMode === 'sentence' ? '&#128257;s' : loopMode === 'paragraph' ? '&#128257;p' : '&#128256;'}</button>
-            <button class="pc-btn continuous-btn ${continuous ? 'active-toggle' : ''}" title="Continuous cross-chapter play">${continuous ? '&#10148;&#10148;' : '&#10148;'}</button>
+            <button class="pc-btn loop-btn ${loopMode === 'sentence' ? 'loop-sent' : loopMode === 'paragraph' ? 'loop-para' : ''}" title="Loop mode — press L to cycle: off/sentence/paragraph"><span style="font-size:11px; font-weight:500; letter-spacing:0.5px;">${loopMode === 'sentence' ? '&#8635; 1' : loopMode === 'paragraph' ? '&#8635; &para;' : '&#8635; off'}</span></button>
+            <button class="pc-btn continuous-btn ${continuous ? 'active-toggle' : ''}" title="Continuous cross-chapter play — auto-nav to next chapter"><span style="font-size:11px; font-weight:500;">&rarr; ch ${continuous ? 'on' : 'off'}</span></button>
             <select class="speed" title="Playback speed">
               <option value="0.75">0.75&times;</option>
               <option value="1" selected>1&times;</option>
               <option value="1.25">1.25&times;</option>
               <option value="1.5">1.5&times;</option>
             </select>
+            <div class="kbd-help">
+              <button title="Keyboard shortcuts">?</button>
+              <div class="kbd-panel"><dl>
+                <dt><kbd>Space</kbd></dt><dd>Play / Pause</dd>
+                <dt><kbd>J</kbd> / <kbd>&rarr;</kbd></dt><dd>Next sentence</dd>
+                <dt><kbd>K</kbd> / <kbd>&larr;</kbd></dt><dd>Prev sentence</dd>
+                <dt><kbd>L</kbd></dt><dd>Cycle loop mode</dd>
+                <dt><kbd>Esc</kbd></dt><dd>Stop</dd>
+                <dt><kbd>[</kbd> / <kbd>]</kbd></dt><dd>Prev / next chapter</dd>
+              </dl></div>
+            </div>
           </div>
         </header>
         <div class="reader-progress"><div class="reader-progress-fill" id="reader-progress-fill"></div></div>
@@ -1925,7 +1972,9 @@
       // Generate button — works for ANY non-source target language, with cost preview
       document.getElementById('btn-generate')?.addEventListener('click', async (e) => {
         // BUG #4 (code-review): disable BEFORE await so double-clicks don't spawn parallel modals.
-        e.target.disabled = true;
+        // BUG B (pre-mortem round 2): cache btn ref so iOS suspend/resume can't leave button stuck via detached e.target.
+        const btn = e.currentTarget;
+        btn.disabled = true;
         const source = ch.sourceText || ch.versions?.[book.sourceLang] || '';
         const cost = estimateTranslateCost(source);
         const bodyHtml = `Translate this chapter to <b>${escapeHtml(langLabelFull)}</b>?<br><br>
@@ -1935,7 +1984,7 @@
           Estimated LLM cost: <b>~$${cost.usd.toFixed(3)}</b> (Sonnet 4.6)<br><br>
           <small>Saves incrementally, resumable on errors. Once done, re-reading is free.</small>`;
         const ok = await confirmCost(`Generate ${langLabelFull}?`, bodyHtml, `Generate (~$${cost.usd.toFixed(3)})`);
-        if (!ok) { e.target.disabled = false; return; }
+        if (!ok) { btn.disabled = false; return; }
         const prog = document.getElementById('gen-progress');
         try {
           await generateTranslation(ch, book, displayLang, level, (done, total) => {
@@ -1944,7 +1993,7 @@
           nav('reader', { chapterId });
         } catch (err) {
           prog.textContent = 'Error: ' + escapeHtml(err.message);
-          e.target.disabled = false;
+          btn.disabled = false;
         }
       });
 
@@ -2110,6 +2159,8 @@
         const inField = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable;
         if (inField) return;
         if (ev.altKey || ev.ctrlKey || ev.metaKey) return;
+        // BUG 2 (code-review round 2): don't hijack keys when a modal is open — user is trying to confirm/cancel.
+        if (document.querySelector('.modal-backdrop')) return;
         switch (ev.key) {
           case ' ': ev.preventDefault(); playBtn.click(); break;
           case 'j': case 'J': case 'ArrowRight': ev.preventDefault(); nextBtn.click(); break;
@@ -2242,7 +2293,7 @@
               ${isVoiced ? '' : '<p class="pop-hint"><small>Voice this chapter to enable ▶ from-here jumps.</small></p>'}
               <div class="pop-actions">
                 <button id="pop-save">+ save</button>
-                <button id="pop-bookmark" title="Bookmark this sentence — appears in book detail bookmarks list">${bmSet.has(sentIdx) ? '&#128278;' : '&#128279;'}</button>
+                <button id="pop-bookmark" title="Bookmark this sentence — appears in book detail bookmarks list">${bmSet.has(sentIdx) ? '&#128204;' : '&#128278;'}</button>
                 <button id="pop-close">✕</button>
               </div>`;
             document.getElementById('pop-save').addEventListener('click', async () => {
@@ -2272,7 +2323,7 @@
               await Storage.chapters.put({ ...stored, sourceText: stored.sourceText });
               if (!pop.hidden) {
                 const btn = document.getElementById('pop-bookmark');
-                if (btn) btn.innerHTML = bmSet.has(sentIdx) ? '&#128278;' : '&#128279;';
+                if (btn) btn.innerHTML = bmSet.has(sentIdx) ? '&#128204;' : '&#128278;';
               }
             });
             document.getElementById('pop-play-word').addEventListener('click', () => {
@@ -2754,10 +2805,12 @@
     }
 
     // BUG #9 (pre-mortem): snapshot current state → if restore fails mid-way, recover atomically.
-    async function importBackup(dump) {
+    // BUG 1 (code-review round 2): non-recursive rollback path (was infinite recursion).
+    // Edge case (pre-mortem round 2): rollback skips audio to avoid re-hitting QuotaExceededError.
+    async function importBackup(dump, _isRollback = false) {
       if (!dump || dump.version !== 1) throw new Error('unsupported backup version');
-      // Snapshot current state before wiping
-      const emergency = await exportBackup();
+      // Snapshot current state before wiping (skip during rollback to avoid infinite recursion)
+      const emergency = _isRollback ? null : await exportBackup();
       try {
         // Wipe first
         await Promise.all([LF_META.clear(), LF_TEXT.clear(), LF_AUDIO.clear()]);
@@ -2779,27 +2832,37 @@
         for (const v of dump.vocab) await LF_META.setItem(`vocab:${v.id}`, v);
         // Settings
         for (const [key, val] of Object.entries(dump.settings || {})) await LF_META.setItem(key, val);
-        // Audio: decode base64 → blob using fetch (avoids large intermediate strings)
+        // Audio: decode base64 → blob using fetch (avoids large intermediate strings).
+        // On rollback we skip audio entirely — device likely at quota; keep the DB structurally sane.
         const lru = [];
-        for (const a of dump.audio || []) {
-          try {
-            const resp = await fetch(`data:audio/mpeg;base64,${a.base64}`);
-            const blob = await resp.blob();
-            await LF_AUDIO.setItem(a.key, { blob, timings: a.timings, size: a.size, ts: a.ts });
-            lru.push({ key: a.key, ts: a.ts, size: a.size });
-          } catch (err) {
-            console.warn('[importBackup] skipping bad audio entry', a.key, err);
+        if (!_isRollback) {
+          for (const a of dump.audio || []) {
+            try {
+              const resp = await fetch(`data:audio/mpeg;base64,${a.base64}`);
+              const blob = await resp.blob();
+              await LF_AUDIO.setItem(a.key, { blob, timings: a.timings, size: a.size, ts: a.ts });
+              lru.push({ key: a.key, ts: a.ts, size: a.size });
+            } catch (err) {
+              console.warn('[importBackup] skipping bad audio entry', a.key, err);
+            }
+          }
+        } else {
+          // Rollback path: clear voiced flags on chapters so UI doesn't advertise playable audio that's missing
+          for (const ch of dump.chapters) {
+            const stored = await LF_META.getItem(`chapter:${ch.id}`);
+            if (stored) { stored.voiced = {}; await LF_META.setItem(`chapter:${ch.id}`, stored); }
           }
         }
         await LF_AUDIO.setItem('__lru__', lru);
       } catch (err) {
-        // Rollback from emergency snapshot
-        console.error('[importBackup] failed; rolling back', err);
-        try {
-          await Promise.all([LF_META.clear(), LF_TEXT.clear(), LF_AUDIO.clear()]);
-          await importBackup(emergency);   // recursive — but emergency was built by exportBackup so it's version=1
-        } catch (rollbackErr) {
-          console.error('[importBackup] ROLLBACK FAILED', rollbackErr);
+        console.error('[importBackup] failed', err);
+        if (emergency) {
+          try {
+            // Non-recursive rollback: pass _isRollback=true so we skip audio + emergency snapshot logic
+            await importBackup(emergency, true);
+          } catch (rollbackErr) {
+            console.error('[importBackup] ROLLBACK FAILED', rollbackErr);
+          }
         }
         throw err;
       }
