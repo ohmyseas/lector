@@ -173,10 +173,13 @@ const shot = async (page, name) => { await page.screenshot({ path: join(OUT, nam
     console.log('\n=== [7] Reader UI — new controls ===');
     await page.evaluate(() => window.nav('reader', { chapterId: 'ch-mega' }));
     await page.waitForSelector('main.reader');
-    for (const sel of ['.prev-ch-btn', '.next-ch-btn', '.loop-btn', '.continuous-btn', '#reader-progress-fill']) {
+    for (const sel of ['.prev-ch-btn', '.next-ch-btn', '.loop-btn', '.continuous-btn', '.reader-progress']) {
       const found = await page.locator(sel).isVisible().catch(() => false);
       if (found) pass(`${sel} rendered`); else fail(`${sel}`, 'not visible');
     }
+    // Progress fill element exists in DOM (visibility check unreliable at 0% width × 3px height)
+    const progExists = await page.evaluate(() => !!document.getElementById('reader-progress-fill'));
+    if (progExists) pass('#reader-progress-fill present in DOM'); else fail('#reader-progress-fill', 'not in DOM');
     // Prev/next chapter — should be disabled (only 1 chapter in book)
     const prevChDisabled = await page.locator('.prev-ch-btn').isDisabled();
     const nextChDisabled = await page.locator('.next-ch-btn').isDisabled();

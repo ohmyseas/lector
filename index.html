@@ -1168,33 +1168,42 @@
         await this.audioEl.play();
       },
       // Sentence just finished — decide next action based on loopMode.
+      // BUG #6 (pre-mortem): re-entry guard — some browsers fire 'ended' twice; loop-paragraph could infinite-loop.
       _onSentenceEnd() {
-        if (this.loopMode === 'sentence') {
-          // Repeat current
-          this._play().catch(err => { console.error('[Player]', err); this.stop(); });
-          return;
-        }
-        if (this.loopMode === 'paragraph') {
-          const curPara = this.sentenceParaIdx[this.idx];
-          const nextIdx = this.idx + 1;
-          if (nextIdx >= this.sentences.length || this.sentenceParaIdx[nextIdx] !== curPara) {
-            // We just finished the last sentence of this paragraph — jump back to first sentence of same paragraph
-            let firstOfPara = this.idx;
-            while (firstOfPara > 0 && this.sentenceParaIdx[firstOfPara - 1] === curPara) firstOfPara--;
-            this.idx = firstOfPara;
+        if (this._handlingEnd) return;
+        this._handlingEnd = true;
+        try {
+          if (this.loopMode === 'sentence') {
             this._play().catch(err => { console.error('[Player]', err); this.stop(); });
             return;
           }
-          // Otherwise fall through to normal next
+          if (this.loopMode === 'paragraph') {
+            const curPara = this.sentenceParaIdx[this.idx];
+            const nextIdx = this.idx + 1;
+            if (nextIdx >= this.sentences.length || this.sentenceParaIdx[nextIdx] !== curPara) {
+              // Last sentence of paragraph — jump back to first sentence of same paragraph
+              let firstOfPara = this.idx;
+              while (firstOfPara > 0 && this.sentenceParaIdx[firstOfPara - 1] === curPara) firstOfPara--;
+              this.idx = firstOfPara;
+              this._play().catch(err => { console.error('[Player]', err); this.stop(); });
+              return;
+            }
+          }
+          this._next();
+        } finally {
+          // Release guard on the next task so a truly-sequential ended event can be handled.
+          setTimeout(() => { this._handlingEnd = false; }, 0);
         }
-        this._next();
       },
       _next() { this.idx++; this._savePos(); this._play().catch(err => { console.error('[Player]', err); this.stop(); }); },
       // End of chapter reached — handle continuous cross-chapter flow.
+      // BUG #2 (code-review): capture cb + null it BEFORE stop() to prevent double-fire on browsers that dispatch 'ended' twice.
       async _onChapterEnd() {
         const cb = this.chapterEndCb;
+        this.chapterEndCb = null;
+        const wasContinuous = this.continuous;
         this.stop();
-        if (cb && this.continuous !== false) {
+        if (cb && wasContinuous !== false) {
           try { await cb(); } catch (err) { console.warn('[Player] chapterEndCb failed', err); }
         }
       },
@@ -1468,6 +1477,8 @@
     // ============ Book detail screen ============
     route('book', async (el, { id, edit }) => {
       const book = await Storage.books.get(id);
+      // BUG #3 (code-review): null-guard against cross-tab delete race
+      if (!book) { nav('library'); return; }
       const chs = await Storage.chapters.list(id);
 
       // Language chip visibility helpers per chapter
@@ -1605,22 +1616,27 @@
           range.selectNodeContents(titleSpan);
           const sel = window.getSelection();
           sel.removeAllRanges(); sel.addRange(range);
+          let cancelled = false;   // BUG #8 (pre-mortem): Escape must skip commit
           const commit = async () => {
-            const newTitle = titleSpan.textContent.trim();
-            titleSpan.setAttribute('contenteditable', 'false');
             titleSpan.removeEventListener('keydown', keyH);
             titleSpan.removeEventListener('blur', commit);
+            const newTitle = titleSpan.textContent.trim();
+            titleSpan.setAttribute('contenteditable', 'false');
+            if (cancelled) { titleSpan.textContent = chs.find(c => c.id === cid).title; return; }
             if (newTitle && newTitle !== chs.find(c => c.id === cid).title) {
               const stored = await Storage.chapters.get(cid);
               stored.title = newTitle;
               await Storage.chapters.put({ ...stored, sourceText: stored.sourceText });
+              // Update local cache so Escape after next rename doesn't restore stale value
+              const localCh = chs.find(c => c.id === cid);
+              if (localCh) localCh.title = newTitle;
             } else {
               titleSpan.textContent = chs.find(c => c.id === cid).title;
             }
           };
           const keyH = (ev) => {
             if (ev.key === 'Enter') { ev.preventDefault(); titleSpan.blur(); }
-            if (ev.key === 'Escape') { titleSpan.textContent = chs.find(c => c.id === cid).title; titleSpan.blur(); }
+            if (ev.key === 'Escape') { ev.preventDefault(); cancelled = true; titleSpan.blur(); }
           };
           titleSpan.addEventListener('keydown', keyH);
           titleSpan.addEventListener('blur', commit);
@@ -1787,7 +1803,10 @@
       _currentRouteAbort = readerAbort;
 
       const ch = await Storage.chapters.get(chapterId);
+      // BUG #3 (code-review): null-guard against cross-tab delete race
+      if (!ch) { nav('library'); return; }
       const book = await Storage.books.get(ch.bookId);
+      if (!book) { nav('library'); return; }
       const displayLang = await Storage.settings.get('displayLang:' + book.id, book.sourceLang);
       const level = await Storage.settings.get('level:' + book.id, 'B1');
 
@@ -1841,7 +1860,8 @@
       const continuous = await Storage.settings.get('continuous', false);
       Player.setLoopMode(loopMode);
       Player.setContinuous(continuous);
-      const showNums = window.__prefsShowNums || await Storage.settings.get('setting:showSentenceNumbers', false);
+      // BUG #1 (code-review): 'setting:' key prefix is added by Storage.settings.get; passing 'setting:showSentenceNumbers' would double-prefix. Use bare key.
+      const showNums = window.__prefsShowNums || await Storage.settings.get('showSentenceNumbers', false);
 
       // Compute which sentence indices are bookmarked in this chapter
       const bookmarks = ch.bookmarks || [];
@@ -1904,6 +1924,8 @@
 
       // Generate button — works for ANY non-source target language, with cost preview
       document.getElementById('btn-generate')?.addEventListener('click', async (e) => {
+        // BUG #4 (code-review): disable BEFORE await so double-clicks don't spawn parallel modals.
+        e.target.disabled = true;
         const source = ch.sourceText || ch.versions?.[book.sourceLang] || '';
         const cost = estimateTranslateCost(source);
         const bodyHtml = `Translate this chapter to <b>${escapeHtml(langLabelFull)}</b>?<br><br>
@@ -1913,8 +1935,7 @@
           Estimated LLM cost: <b>~$${cost.usd.toFixed(3)}</b> (Sonnet 4.6)<br><br>
           <small>Saves incrementally, resumable on errors. Once done, re-reading is free.</small>`;
         const ok = await confirmCost(`Generate ${langLabelFull}?`, bodyHtml, `Generate (~$${cost.usd.toFixed(3)})`);
-        if (!ok) return;
-        e.target.disabled = true;
+        if (!ok) { e.target.disabled = false; return; }
         const prog = document.getElementById('gen-progress');
         try {
           await generateTranslation(ch, book, displayLang, level, (done, total) => {
@@ -1937,6 +1958,8 @@
         voiceBtn.className = 'voice-btn';
         el.querySelector('.reader-topbar').appendChild(voiceBtn);
         voiceBtn.addEventListener('click', async () => {
+          // BUG #4 (code-review): disable BEFORE await confirmCost so double-clicks don't spawn parallel modals.
+          voiceBtn.disabled = true;
           const cost = estimateVoiceCost(body || '');
           const bodyHtml = `Voice this chapter in <b>${escapeHtml(langLabelFull)}</b>?<br><br>
             Chapter length: <b>${cost.chars.toLocaleString()} chars</b><br>
@@ -1944,8 +1967,7 @@
             Estimated cost (Creator tier): <b>~$${cost.usdApprox.toFixed(2)}</b><br><br>
             <small>One-time cost. Audio + word timings cached locally forever.</small>`;
           const ok = await confirmCost(`Voice this chapter?`, bodyHtml, `Voice (~$${cost.usdApprox.toFixed(2)})`);
-          if (!ok) return;
-          voiceBtn.disabled = true;
+          if (!ok) { voiceBtn.disabled = false; return; }
           voiceBtn.textContent = 'Voicing…';
           try {
             await voiceChapter(ch, book, displayLang, level, (d, t) => {
@@ -2049,10 +2071,12 @@
       });
 
       // ---- Continuous cross-chapter auto-advance ----
-      // When Player finishes the last sentence AND continuous=true, jump to next chapter and resume RWL there.
+      // BUG #7 (pre-mortem): check next chapter is voiced in the CURRENT key before hopping.
+      // Otherwise autoplay silently no-ops on the next render and Ilya waits at 100%.
       Player.chapterEndCb = async () => {
         if (!Player.continuous) return;
         if (!nextCh) return;
+        const nextVoiced = !!nextCh.voiced?.[currentKey];
         // Save current chapter position as fully-read (positionFraction = 1)
         try {
           const stored = await Storage.chapters.get(chapterId);
@@ -2061,7 +2085,12 @@
             await Storage.chapters.put({ ...stored, sourceText: stored.sourceText });
           }
         } catch {}
-        // Navigate — the new reader render will pick up Player state
+        if (!nextVoiced) {
+          console.warn(`[continuous] next chapter "${nextCh.title}" not voiced in ${currentKey} — stopping cross-chapter flow`);
+          // Nav to the next chapter but don't autoplay; user sees the Voice button.
+          nav('reader', { chapterId: nextCh.id });
+          return;
+        }
         nav('reader', { chapterId: nextCh.id, autoplay: true });
       };
 
@@ -2606,16 +2635,20 @@
           });
           const j = await r.json();
           if (j.error) throw new Error(j.error);
-          const succeeded = (j.result || []).filter(x => x != null).length;
-          // Mark them as exported in storage
+          // BUG #10 (pre-mortem): older AnkiConnect returned non-array shapes → we falsely marked all as exported.
+          if (!Array.isArray(j.result)) {
+            throw new Error(`AnkiConnect returned unexpected result shape: ${JSON.stringify(j.result).slice(0, 120)}`);
+          }
+          const succeeded = j.result.filter(x => typeof x === 'number').length;
+          // Mark exported ONLY where AnkiConnect returned a numeric note ID (real success).
           for (let i = 0; i < unexported.length; i++) {
-            if ((j.result || [])[i] != null) {
+            if (typeof j.result[i] === 'number') {
               const v = unexported[i];
               v.exported = true;
               await Storage.vocab.put(v);
             }
           }
-          status.textContent = `Pushed ${succeeded} / ${unexported.length} cards. Deck "lector" in Anki.`;
+          status.textContent = `Pushed ${succeeded} / ${unexported.length} cards to deck "lector".`;
         } catch (err) {
           status.textContent = 'Failed: ' + err.message;
         }
@@ -2676,6 +2709,8 @@
 
     // ============ Backup / restore helpers ============
     // Serialize the entire IndexedDB (meta + text + audio-with-blobs-as-base64) → JSON dump.
+    // BUG #5 (code-review): don't dump chapters:${bid} into dump.text; the restore rebuilds it from dump.chapters.
+    // BUG #6 (code-review): iterate LF_AUDIO for FULL audio, not just LRU index.
     async function exportBackup() {
       const dump = { version: 1, ts: Date.now(), books: [], chapters: [], text: {}, vocab: [], settings: {}, audio: [] };
       const bookIds = (await LF_META.getItem('books:index')) || [];
@@ -2687,9 +2722,8 @@
           const ch = await LF_META.getItem(`chapter:${cid}`);
           if (ch) dump.chapters.push(ch);
         }
-        dump.text[`chapters:${bid}`] = chIdx;
       }
-      // Text bodies
+      // Text bodies (only actual text, not chapter indices)
       await LF_TEXT.iterate((val, key) => { dump.text[key] = val; });
       // Vocab
       const vIds = (await LF_META.getItem('vocab:index')) || [];
@@ -2701,54 +2735,74 @@
       await LF_META.iterate((val, key) => {
         if (key.startsWith('setting:')) dump.settings[key] = val;
       });
-      // Audio: convert blob → base64
-      const lru = (await LF_AUDIO.getItem('__lru__')) || [];
-      for (const entry of lru) {
-        const rec = await LF_AUDIO.getItem(entry.key);
-        if (!rec) continue;
+      // Audio: iterate LF_AUDIO directly (all blobs, not only LRU). Skip the LRU key itself.
+      const audioKeys = [];
+      await LF_AUDIO.iterate((val, key) => {
+        if (key === '__lru__') return;
+        if (!val || !val.blob) return;
+        audioKeys.push({ key, rec: val });
+      });
+      for (const { key, rec } of audioKeys) {
         const b64 = await new Promise((res) => {
           const fr = new FileReader();
           fr.onload = () => res(fr.result.split(',')[1] || '');
           fr.readAsDataURL(rec.blob);
         });
-        dump.audio.push({ key: entry.key, base64: b64, timings: rec.timings, size: rec.size, ts: rec.ts });
+        dump.audio.push({ key, base64: b64, timings: rec.timings, size: rec.size, ts: rec.ts });
       }
       return dump;
     }
 
+    // BUG #9 (pre-mortem): snapshot current state → if restore fails mid-way, recover atomically.
     async function importBackup(dump) {
       if (!dump || dump.version !== 1) throw new Error('unsupported backup version');
-      // Wipe first
-      await Promise.all([LF_META.clear(), LF_TEXT.clear(), LF_AUDIO.clear()]);
-      // Books + book:index
-      await LF_META.setItem('books:index', dump.books.map(b => b.id));
-      for (const b of dump.books) await LF_META.setItem(`book:${b.id}`, b);
-      // Chapters
-      for (const ch of dump.chapters) await LF_META.setItem(`chapter:${ch.id}`, ch);
-      // Text bodies + chapter indices
-      for (const [key, val] of Object.entries(dump.text)) await LF_TEXT.setItem(key, val);
-      // Restore chapters:${bookId} indices from text if present, or from grouping chapters
-      for (const b of dump.books) {
-        const chIds = dump.chapters.filter(c => c.bookId === b.id).sort((a, c) => a.index - c.index).map(c => c.id);
-        await LF_META.setItem(`chapters:${b.id}`, chIds);
+      // Snapshot current state before wiping
+      const emergency = await exportBackup();
+      try {
+        // Wipe first
+        await Promise.all([LF_META.clear(), LF_TEXT.clear(), LF_AUDIO.clear()]);
+        // Books + book:index
+        await LF_META.setItem('books:index', dump.books.map(b => b.id));
+        for (const b of dump.books) await LF_META.setItem(`book:${b.id}`, b);
+        // Chapters
+        for (const ch of dump.chapters) await LF_META.setItem(`chapter:${ch.id}`, ch);
+        // Text bodies
+        for (const [key, val] of Object.entries(dump.text)) await LF_TEXT.setItem(key, val);
+        // Rebuild chapters:${bookId} indices from grouping chapters (bug #5 fix)
+        for (const b of dump.books) {
+          const chIds = dump.chapters.filter(c => c.bookId === b.id).sort((a, c) => a.index - c.index).map(c => c.id);
+          await LF_META.setItem(`chapters:${b.id}`, chIds);
+        }
+        // Vocab
+        const vIds = dump.vocab.map(v => v.id);
+        await LF_META.setItem('vocab:index', vIds);
+        for (const v of dump.vocab) await LF_META.setItem(`vocab:${v.id}`, v);
+        // Settings
+        for (const [key, val] of Object.entries(dump.settings || {})) await LF_META.setItem(key, val);
+        // Audio: decode base64 → blob using fetch (avoids large intermediate strings)
+        const lru = [];
+        for (const a of dump.audio || []) {
+          try {
+            const resp = await fetch(`data:audio/mpeg;base64,${a.base64}`);
+            const blob = await resp.blob();
+            await LF_AUDIO.setItem(a.key, { blob, timings: a.timings, size: a.size, ts: a.ts });
+            lru.push({ key: a.key, ts: a.ts, size: a.size });
+          } catch (err) {
+            console.warn('[importBackup] skipping bad audio entry', a.key, err);
+          }
+        }
+        await LF_AUDIO.setItem('__lru__', lru);
+      } catch (err) {
+        // Rollback from emergency snapshot
+        console.error('[importBackup] failed; rolling back', err);
+        try {
+          await Promise.all([LF_META.clear(), LF_TEXT.clear(), LF_AUDIO.clear()]);
+          await importBackup(emergency);   // recursive — but emergency was built by exportBackup so it's version=1
+        } catch (rollbackErr) {
+          console.error('[importBackup] ROLLBACK FAILED', rollbackErr);
+        }
+        throw err;
       }
-      // Vocab
-      const vIds = dump.vocab.map(v => v.id);
-      await LF_META.setItem('vocab:index', vIds);
-      for (const v of dump.vocab) await LF_META.setItem(`vocab:${v.id}`, v);
-      // Settings
-      for (const [key, val] of Object.entries(dump.settings || {})) await LF_META.setItem(key, val);
-      // Audio: decode base64 → blob
-      const lru = [];
-      for (const a of dump.audio || []) {
-        const bin = atob(a.base64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const blob = new Blob([bytes], { type: 'audio/mpeg' });
-        await LF_AUDIO.setItem(a.key, { blob, timings: a.timings, size: a.size, ts: a.ts });
-        lru.push({ key: a.key, ts: a.ts, size: a.size });
-      }
-      await LF_AUDIO.setItem('__lru__', lru);
     }
     window.exportBackup = exportBackup;
     window.importBackup = importBackup;
